@@ -1,0 +1,1 @@
+"""Newsletter Automation Package"""
