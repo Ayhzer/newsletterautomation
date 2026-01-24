@@ -31,25 +31,61 @@ import sys
 # Base directory (this file's directory)
 BASE_DIR = Path(__file__).resolve().parent
 
-# Charger la configuration depuis le dossier config/
-config_dir = BASE_DIR.parent.parent / 'config'
-config_file = config_dir / 'config.py'
+# ==================== CHARGEMENT CONFIGURATION ====================
+# Priorité aux variables d'environnement (pour GitHub Actions)
+# Puis fallback sur config/config.py (pour dev local)
 
-if not config_file.exists():
-    raise FileNotFoundError(
-        f"Fichier config/config.py non trouvé à {config_file}\n"
-        f"Créez-le à partir de config/config.example.py:\n"
-        f"  cp config/config.example.py config/config.py"
-    )
+PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY')
+NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
+NOTION_PARENT_PAGE_ID = os.environ.get('NOTION_PARENT_PAGE_ID')
+NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
 
-# Charger le fichier config.py
-import importlib.util
-spec = importlib.util.spec_from_file_location("config_module", config_file)
-config_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(config_module)
+# Si les variables d'environnement ne sont pas définies, charger config.py
+if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATION_EMAIL]):
+    print('⚙️  Variables d\'environnement non trouvées, chargement de config.py...')
+    
+    config_dir = BASE_DIR.parent.parent / 'config'
+    config_file = config_dir / 'config.py'
+    
+    if not config_file.exists():
+        raise FileNotFoundError(
+            f"Fichier config/config.py non trouvé à {config_file}\n"
+            f"Créez-le à partir de config/config.example.py:\n"
+            f"  cp config/config.example.py config/config.py"
+        )
+    
+    # Charger le fichier config.py
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("config_module", config_file)
+    config_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config_module)
+    
+    CONFIG = config_module.CONFIG
+    SCOPES = config_module.SCOPES
+    
+    PERPLEXITY_API_KEY = CONFIG['PERPLEXITY_API_KEY']
+    NOTION_TOKEN = CONFIG['NOTION_TOKEN']
+    NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
+    NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
+    EMAIL_SOURCES = CONFIG['EMAIL_SOURCES']
+else:
+    print('✅ Variables d\'environnement chargées (GitHub Actions mode)')
+    # Pour GitHub Actions, définir EMAIL_SOURCES depuis env ou utiliser une valeur par défaut
+    EMAIL_SOURCES = os.environ.get('EMAIL_SOURCES', '').split(',') if os.environ.get('EMAIL_SOURCES') else []
+    SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
-CONFIG = config_module.CONFIG
-SCOPES = config_module.SCOPES
+# Créer un objet CONFIG pour compatibilité avec le reste du code
+CONFIG = {
+    'PERPLEXITY_API_KEY': PERPLEXITY_API_KEY,
+    'NOTION_TOKEN': NOTION_TOKEN,
+    'NOTION_PARENT_PAGE_ID': NOTION_PARENT_PAGE_ID,
+    'NOTIFICATION_EMAIL': NOTIFICATION_EMAIL,
+    'EMAIL_SOURCES': EMAIL_SOURCES
+}
+
+if not SCOPES:
+    SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+
 
 # ==================== FONCTIONS GMAIL ====================
 def get_gmail_service():
