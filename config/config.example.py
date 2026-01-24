@@ -1,34 +1,35 @@
-"""Configuration example file"""
-from pathlib import Path
-import os
-from dotenv import load_dotenv
+"""
+Configuration pour Newsletter Automation
+Copier ce fichier en config.py et remplir vos vraies valeurs
+"""
 
-# Chemin racine du projet
-ROOT = Path(__file__).resolve().parents[1]
-
-# Charger les variables d'environnement
-load_dotenv(ROOT / ".env", override=False)
-
-# Scopes Gmail
+# ==================== GMAIL ====================
+# Scopes d'accès Gmail
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.modify"
 ]
 
-# Configuration
+# ==================== CONFIGURATION ====================
 CONFIG = {
-    # Adresses email des newsletters à traiter
+    # Gmail - Adresses email des newsletters à traiter
     "EMAIL_SOURCES": [
-        "newsletter@example.com",
-        "info@example.com",
+        "newsletter@techmeme.com",
+        "newsletter@update.insideevs.com",
+        "dan@tldrnewsletter.com",
+        "noreply@medium.com",
     ],
     
-    # Clés API (chargées depuis .env)
-    "PERPLEXITY_API_KEY": os.getenv("PERPLEXITY_API_KEY"),
-    "NOTION_API_KEY": os.getenv("NOTION_API_KEY"),
-    "NOTION_DATABASE_ID": os.getenv("NOTION_DATABASE_ID"),
+    # Perplexity AI API
+    "PERPLEXITY_API_KEY": "pplx-xxxxxxxxxxxxxxxxxxxxx",  # À remplir
     
-    # Chemins
-    "SYNTHESIS_DIR": ROOT / "data" / "output",
-    "CREDENTIALS_DIR": ROOT / "credentials",
+    # Notion API
+    "NOTION_TOKEN": "ntn_xxxxxxxxxxxxxxxxxxxxx",  # À remplir
+    "NOTION_PARENT_PAGE_ID": "xxxxxxxxxxxxxxxxxxxxx",  # À remplir
+    
+    # NotebookLM API (optionnel - pour génération automatique de podcasts)
+    "NOTEBOOKLM_API_KEY": "",  # À remplir si vous utilisez l'API NotebookLM
+    
+    # Email de notification
+    "NOTIFICATION_EMAIL": "votre.email@example.com",  # À remplir
 }
+

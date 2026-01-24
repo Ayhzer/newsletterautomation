@@ -6,6 +6,7 @@ __pycache__/
 .env
 .venv/
 venv/
+env/
 *.egg-info/
 dist/
 build/
@@ -13,12 +14,20 @@ build/
 # Données générées
 data/output/
 data/input/*.tmp
+syntheses/
+src/newsletter_automation/syntheses/
 
-# Secrets / credentials
+# Secrets / credentials (NE JAMAIS PUSH)
 credentials/
 config/config.py
+src/newsletter_automation/credentials.json
+src/newsletter_automation/token.json
 token.json
 credentials.json
+*.key
+*.pem
+.env.local
+.env.*.local
 
 # IDE
 .vscode/
@@ -26,7 +35,22 @@ credentials.json
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
 Thumbs.db
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+desktop.ini
+
+# Misc
+*.log
+*.tmp
+.cache/
+.pytest_cache/
+
