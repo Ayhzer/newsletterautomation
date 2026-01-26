@@ -32,10 +32,12 @@ jobs:
 
       - name: Run newsletter automation
         env:
+          GITHUB_ACTIONS: 'true'
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
           NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
           EMAIL_SOURCES: ${{ secrets.EMAIL_SOURCES }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           python src/newsletter_automation/newsletter_automation.py

@@ -99,7 +99,36 @@ def get_gmail_service():
     creds = None
     # Le fichier token.json stocke les tokens d'accès
     token_path = BASE_DIR / 'token.json'
-    creds = None
+    
+    # Mode GitHub Actions : utiliser les variables d'environnement
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        print('📍 Mode GitHub Actions détecté')
+        
+        # Charger les credentials depuis la variable d'environnement
+        google_credentials_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+        if not google_credentials_json:
+            raise FileNotFoundError(
+                "Variable d'environnement GOOGLE_CREDENTIALS_JSON non trouvée.\n"
+                "Ajoutez-la dans GitHub Settings → Secrets → GOOGLE_CREDENTIALS_JSON"
+            )
+        
+        # Créer un fichier temporaire avec les credentials
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(google_credentials_json)
+            temp_credentials_path = f.name
+        
+        try:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                temp_credentials_path, SCOPES)
+            creds = flow.run_local_server(port=0)
+        finally:
+            import os as os_module
+            os_module.unlink(temp_credentials_path)
+        
+        return build('gmail', 'v1', credentials=creds)
+    
+    # Mode développement local : utiliser les fichiers locaux
     if token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
     
@@ -108,8 +137,14 @@ def get_gmail_service():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            credentials_file = BASE_DIR / 'credentials.json'
+            if not credentials_file.exists():
+                raise FileNotFoundError(
+                    f"Fichier {credentials_file} non trouvé.\n"
+                    f"Créez-le en suivant : https://developers.google.com/gmail/api/quickstart/python"
+                )
             flow = InstalledAppFlow.from_client_secrets_file(
-                str(BASE_DIR / 'credentials.json'), SCOPES)
+                str(credentials_file), SCOPES)
             creds = flow.run_local_server(port=0)
         
         # Sauvegarder les credentials
