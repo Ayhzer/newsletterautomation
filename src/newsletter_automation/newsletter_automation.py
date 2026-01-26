@@ -44,8 +44,12 @@ NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
 if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATION_EMAIL]):
     print('⚙️  Variables d\'environnement non trouvées, chargement de config.py...')
     
-    config_dir = BASE_DIR.parent.parent / 'config'
-    config_file = config_dir / 'config.py'
+    # Essayer d'abord le chemin relatif au répertoire courant (GitHub Actions)
+    config_file = Path('config') / 'config.py'
+    if not config_file.exists():
+        # Sinon utiliser le chemin absolu (développement local)
+        config_dir = BASE_DIR.parent.parent / 'config'
+        config_file = config_dir / 'config.py'
     
     if not config_file.exists():
         raise FileNotFoundError(
