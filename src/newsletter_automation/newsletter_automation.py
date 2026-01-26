@@ -97,44 +97,67 @@ def get_gmail_service():
     print('🔐 Authentification Gmail...')
     
     creds = None
-    # Le fichier token.json stocke les tokens d'accès
     token_path = BASE_DIR / 'token.json'
     
-    # Mode GitHub Actions : utiliser les variables d'environnement
+    # Mode GitHub Actions : utiliser les secrets
     if os.environ.get('GITHUB_ACTIONS') == 'true':
         print('📍 Mode GitHub Actions détecté')
         
-        # Charger les credentials depuis la variable d'environnement
+        # Priorité 1 : Token OAuth pré-généré (stocké en secret)
+        token_json_env = os.environ.get('GOOGLE_OAUTH_TOKEN_JSON')
+        if token_json_env:
+            print('✅ Token OAuth trouvé dans GOOGLE_OAUTH_TOKEN_JSON')
+            import tempfile
+            import json
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                f.write(token_json_env)
+                temp_token_path = f.name
+            
+            try:
+                creds = Credentials.from_authorized_user_file(temp_token_path, SCOPES)
+                return build('gmail', 'v1', credentials=creds)
+            finally:
+                os.unlink(temp_token_path)
+        
+        # Priorité 2 : Credentials JSON avec refresh token
         google_credentials_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
         if not google_credentials_json:
             raise FileNotFoundError(
-                "Variable d'environnement GOOGLE_CREDENTIALS_JSON non trouvée.\n"
-                "Ajoutez-la dans GitHub Settings → Secrets → GOOGLE_CREDENTIALS_JSON"
+                "Ni GOOGLE_OAUTH_TOKEN_JSON ni GOOGLE_CREDENTIALS_JSON trouvés.\n"
+                "Ajoutez l'un d'eux dans GitHub Settings → Secrets:\n"
+                "- GOOGLE_OAUTH_TOKEN_JSON: Token OAuth pré-généré (recommandé)\n"
+                "- GOOGLE_CREDENTIALS_JSON: fichier credentials.json avec refresh_token"
             )
         
-        # Créer un fichier temporaire avec les credentials
+        print('✅ Credentials JSON trouvées, tentative d\'authentification...')
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             f.write(google_credentials_json)
             temp_credentials_path = f.name
         
         try:
+            # Essayer d'abord le mode sans navigateur
             flow = InstalledAppFlow.from_client_secrets_file(
                 temp_credentials_path, SCOPES)
-            creds = flow.run_local_server(port=0)
+            # Mode sans navigateur pour GitHub Actions
+            creds = flow.run_local_server(port=0, open_browser=False)
+            print('⚠️  Authentification manuelle requise. Visitez l\'URL ci-dessus.')
+            return build('gmail', 'v1', credentials=creds)
         finally:
-            import os as os_module
-            os_module.unlink(temp_credentials_path)
-        
-        return build('gmail', 'v1', credentials=creds)
+            os.unlink(temp_credentials_path)
     
-    # Mode développement local : utiliser les fichiers locaux
+    # Mode développement local
+    print('📍 Mode développement local')
+    
+    # Essayer de charger le token existant
     if token_path.exists():
+        print('✅ Token local trouvé, chargement...')
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
     
     # Si pas de credentials valides, on lance l'authentification
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            print('🔄 Rafraîchissement du token...')
             creds.refresh(Request())
         else:
             credentials_file = BASE_DIR / 'credentials.json'
@@ -143,6 +166,7 @@ def get_gmail_service():
                     f"Fichier {credentials_file} non trouvé.\n"
                     f"Créez-le en suivant : https://developers.google.com/gmail/api/quickstart/python"
                 )
+            print('🌐 Ouverture du navigateur pour authentification...')
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(credentials_file), SCOPES)
             creds = flow.run_local_server(port=0)
@@ -150,6 +174,7 @@ def get_gmail_service():
         # Sauvegarder les credentials
         with open(str(token_path), 'w', encoding='utf-8') as token:
             token.write(creds.to_json())
+        print('💾 Token sauvegardé')
     
     return build('gmail', 'v1', credentials=creds)
 
