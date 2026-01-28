@@ -277,7 +277,7 @@ def get_or_create_label(service, label_name):
 
 
 def mark_emails_as_read_and_label(service, email_ids, label_name='newletterinnotion'):
-    """Marque les emails comme lus et les déplace dans un libellé"""
+    """Marque les emails comme lus, les déplace dans un libellé et les retire de la boite de réception"""
     print('✓ Marquage des emails comme lus...')
     
     # Obtenir ou créer le libellé
@@ -288,12 +288,12 @@ def mark_emails_as_read_and_label(service, email_ids, label_name='newletterinnot
         userId='me',
         body={
             'ids': email_ids,
-            'removeLabelIds': ['UNREAD'],
+            'removeLabelIds': ['UNREAD', 'INBOX', 'IMPORTANT'],
             'addLabelIds': [label_id]
         }
     ).execute()
     
-    print(f'✅ Emails marqués comme lus et étiquetés "{label_name}"')
+    print(f'✅ Emails marqués comme lus, étiquetés "{label_name}" et retirés de la boite de réception')
 
 
 def send_notification(service, notion_url, synthesis_path, emails=None, notebooklm_url=None):
@@ -393,13 +393,29 @@ def synthesize_with_perplexity(emails, max_retries=3):
         for email in emails
     ])
     
-    prompt = f"""Tu es un assistant qui synthétise des newsletters tech en français.
+    prompt = f"""Tu es un assistant expert qui synthétise des newsletters tech en français de manière très structurée et détaillée.
 
-Voici les newsletters reçues aujourd'hui. Crée une synthèse détaillée, structurée et en français de l'ensemble de ces contenus.
+Crée une synthèse complète des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format:
 
-Organise la synthèse par thèmes principaux (technologies, véhicules électriques, actualités tech, etc.) et présente les informations de manière claire et digeste.
+## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
 
-NEWSLETTERS:
+Pour chaque thème principal trouvé, crée une section avec:
+- **Titre du thème** (ex: IA et Machine Learning, Cloud et Infrastructure, etc.)
+- Une **introduction** courte présentant le sujet
+- Une liste de **points clés** (utilise • pour chaque point important)
+- Les **éléments à retenir** avec impact ou implications
+- Les **chiffres ou données** pertinents s'il y en a
+
+Structure générale demandée:
+1. **Section résumé exécutif** (ce qu'il faut retenir en 3-4 points clés)
+2. **Sections thématiques principales** (groupées par domaine/sujet)
+3. **Tendances émergentes** (si identifiées)
+4. **Impacts et implications** (ce que cela signifie pour vous)
+
+Sois très détaillé, utilise des sous-titres clairs, et rends le texte facile à scanner.
+Ajoute des emojis pertinents pour améliorer la lisibilité.
+
+NEWSLETTERS À SYNTHÉTISER:
 {emails_text}"""
     
     # Appel API Perplexity avec retry et gestion d'erreurs améliorée
