@@ -11,14 +11,6 @@ SCOPES = [
 
 # ==================== CONFIGURATION ====================
 CONFIG = {
-    # Gmail - Adresses email des newsletters à traiter
-    "EMAIL_SOURCES": [
-        "newsletter@techmeme.com",
-        "newsletter@update.insideevs.com",
-        "dan@tldrnewsletter.com",
-        "noreply@medium.com",
-    ],
-    
     # Perplexity AI API
     "PERPLEXITY_API_KEY": "pplx-xxxxxxxxxxxxxxxxxxxxx",  # À remplir
     
@@ -26,10 +18,10 @@ CONFIG = {
     "NOTION_TOKEN": "ntn_xxxxxxxxxxxxxxxxxxxxx",  # À remplir
     "NOTION_PARENT_PAGE_ID": "xxxxxxxxxxxxxxxxxxxxx",  # À remplir
     
-    # NotebookLM API (optionnel - pour génération automatique de podcasts)
-    "NOTEBOOKLM_API_KEY": "",  # À remplir si vous utilisez l'API NotebookLM
-    
     # Email de notification
     "NOTIFICATION_EMAIL": "votre.email@example.com",  # À remplir
 }
+
+# Note: Les EMAIL_SOURCES sont maintenant chargées depuis email_sources.txt
+# Copiez email_sources.example.txt en email_sources.txt et modifiez-le selon vos besoins
 

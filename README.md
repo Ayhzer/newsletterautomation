@@ -2,173 +2,191 @@
 
 Script Python qui automatise la récupération de newsletters Gmail, génère des synthèses via Perplexity AI et crée des pages Notion.
 
-## Fonctionnalités
+## 🎯 Fonctionnalités
 
-- ✅ Récupération automatique des emails depuis Gmail
-- ✅ Génération de synthèses intelligentes via l'API Perplexity
-- ✅ Création automatique de pages Notion
-- ✅ Sauvegarde locale des synthèses
-- ✅ Marquage des emails traités
-- ✅ Gestion robuste des erreurs avec retry automatique
-- ✅ Chemins absolus (fonctionne partout)
-- ✅ Configuration sécurisée (variables d'env)
+- ✅ **Récupération automatique** des emails depuis Gmail
+- ✅ **Synthèses intelligentes** via l'API Perplexity (structurées et détaillées)
+- ✅ **Création de pages Notion** automatiquement
+- ✅ **Pièce jointe au mail** - Synthèse prête pour NotebookLM
+- ✅ **Sauvegarde locale** des synthèses en `.txt`
+- ✅ **Gestion intelligente des emails** - Jusqu'à 2 par source
+- ✅ **Marquage automatique** et retrait de la boite de réception/notifications
+- ✅ **Gestion robuste des erreurs** avec retry automatique
+- ✅ **GitHub Actions ready** - Planification automatique
+- ✅ **Configuration sécurisée** - Secrets GitHub ou env variables
 
-## Structure du projet
+## 📋 Structure du projet
 
 ```
 newsletter-automation/
 ├─ src/
 │  └─ newsletter_automation/
 │     ├─ __init__.py
-│     ├─ config.py              # Configuration (variables d'env)
-│     ├─ newsletter_automation.py # Script principal
-│     ├─ credentials.json       # OAuth Gmail (à créer)
-│     └─ token.json             # Token Gmail (auto-généré)
-├─ .env                         # À créer (copier .env.example)
-├─ .env.example                 # Template configuration
-├─ requirements.txt             # Dépendances Python
-├─ validate.py                  # Script de validation
-├─ test_perplexity.py          # Test connexion API Perplexity
-├─ VERIFICATION_REPORT.md      # Rapport des corrections
-├─ TROUBLESHOOTING_PERPLEXITY.md # Guide de dépannage
-└─ README.md
+│     ├─ newsletter_automation.py  # Script principal
+│     ├─ credentials.json          # OAuth Gmail (à créer)
+│     └─ token.json                # Token Gmail (auto-généré)
+├─ config/
+│  └─ config.example.py            # Template configuration
+├─ email_sources.example.txt       # Template sources email
+├─ requirements.txt                # Dépendances Python
+├─ README.md                       # Ce fichier
+├─ INSTALLATION.md                 # Guide installation détaillé
+├─ GITHUB_SECRETS.md               # Configuration secrets GitHub
+├─ QUICKSTART.md                   # Démarrage rapide
+└─ NOTEBOOKLM_SETUP.md            # Intégration NotebookLM
 ```
 
-## Installation
-
-### 1. Cloner le dépôt
+## ⚡ Démarrage rapide (5 min)
 
 ```bash
-git clone https://github.com/Ayhzer/newsletterautomation.git
-cd newsletterautomation
-```
+# 1. Cloner
+git clone https://github.com/Ayhzer/newsletter-automation.git
+cd newsletter-automation
 
-### 2. Créer un environnement virtuel
-
-```bash
+# 2. Environnement virtuel
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-```
 
-### 3. Installer les dépendances
-
-```bash
+# 3. Dépendances
 pip install -r requirements.txt
+
+# 4. Configuration
+cp config/config.example.py config/config.py
+cp email_sources.example.txt email_sources.txt
+# Éditer les deux fichiers avec vos paramètres
+
+# 5. Lancer
+python src/newsletter_automation/newsletter_automation.py
 ```
 
-### 4. Configuration
+> ℹ️ Pour un guide détaillé, voir [INSTALLATION.md](INSTALLATION.md) ou [QUICKSTART.md](QUICKSTART.md)
 
-#### a. Créer le fichier de configuration
+## 🔧 Configuration
 
+### Configuration locale
+
+**1. Fichier config.py:**
 ```bash
-# Copier le template
 cp config/config.example.py config/config.py
 ```
 
-#### b. Remplir les valeurs dans `config/config.py`
+Remplir dans `config/config.py`:
+- `PERPLEXITY_API_KEY` - Clé API Perplexity
+- `NOTION_TOKEN` - Token Notion
+- `NOTION_PARENT_PAGE_ID` - ID page Notion
+- `NOTIFICATION_EMAIL` - Email pour les notifications
 
-```python
-CONFIG = {
-    # Gmail - Sources newsletters
-    "EMAIL_SOURCES": [
-        "newsletter1@example.com",
-        "newsletter2@example.com",
-    ],
-    
-    # Perplexity API
-    "PERPLEXITY_API_KEY": "pplx-xxxxxxxxxxxxxxxxxxxxx",  # À remplir
-    
-    # Notion API
-    "NOTION_TOKEN": "ntn_xxxxxxxxxxxxxxxxxxxxx",  # À remplir
-    "NOTION_PARENT_PAGE_ID": "xxxxxxxxxxxxxxxxxxxxx",  # À remplir
-    
-    # Email de notification
-    "NOTIFICATION_EMAIL": "votre.email@example.com",  # À remplir
-}
+**2. Fichier email_sources.txt:**
+```bash
+cp email_sources.example.txt email_sources.txt
 ```
 
-#### c. Configurer Gmail OAuth
+Ajouter vos adresses email (une par ligne):
+```
+newsletter@example.com
+newsletter2@example.com
+```
 
+**3. Gmail OAuth:**
 1. Créer un projet dans [Google Cloud Console](https://console.cloud.google.com/)
 2. Activer l'API Gmail
-3. Créer des identifiants OAuth 2.0 (type "Application de bureau")
-4. Télécharger le fichier JSON et le placer à:
-   ```
-   src/newsletter_automation/credentials.json
-   ```
+3. Créer identifiants OAuth (type "Application de bureau")
+4. Placer le JSON à: `src/newsletter_automation/credentials.json`
 
-### 5. Valider la configuration
+### Configuration GitHub Actions
 
-```bash
-# Vérifier tous les fichiers et dépendances
-python validate.py
+Pour l'automatisation GitHub, voir [GITHUB_SECRETS.md](GITHUB_SECRETS.md) avec:
+- Syntaxe exacte pour chaque secret
+- Où obtenir les clés API
+- Options d'authentification Gmail
 
-# Tester la connexion Perplexity API
-python test_perplexity.py
-```
+## 📧 Dépendances principales
 
-## Utilisation
+- `google-auth-oauthlib` - Authentification Gmail OAuth 2.0
+- `google-api-python-client` - API Gmail
+- `requests` - Appels API Perplexity et Notion
+- `notion-client` - Création pages Notion
+- `html2text` - Conversion HTML → Markdown
+
+## 🚀 Utilisation
+
+### Local
 
 ```bash
 python src/newsletter_automation/newsletter_automation.py
 ```
 
-Lors de la première exécution, une fenêtre de navigateur s'ouvrira pour autoriser l'accès à Gmail.
+À la première exécution, un navigateur s'ouvre pour autoriser l'accès Gmail.
 
-## Dépendances principales
+### GitHub Actions (Automatisé)
 
-- `google-auth-oauthlib` : Authentification Gmail OAuth 2.0
-- `google-api-python-client` : API Gmail
-- `requests` : Appels API Perplexity et Notion
-- `notion-client` : Création de pages Notion
-- `html2text` : Conversion HTML → Markdown
-- `python-dotenv` : Gestion variables d'environnement
+Le workflow s'exécute automatiquement selon le planning configuré. Voir [GITHUB_SECRETS.md](GITHUB_SECRETS.md) pour configurer les secrets.
 
-## Dépannage
+## 📊 Flux de travail
 
-### Erreur Perplexity API
+1. 📧 **Récupère** les 2 derniers emails de chaque source
+2. 🤖 **Synthétise** avec Perplexity en sections structurées
+3. 💾 **Sauvegarde** le fichier `.txt`
+4. 📝 **Crée** une page Notion
+5. 🏷️ **Marque** les emails:
+   - ✅ Lu
+   - 📂 Retrait INBOX
+   - 📬 Retrait NOTIFICATIONS
+   - 🏷️ Ajout du label "newletterinnotion"
+6. 📨 **Envoie** notification email avec:
+   - Lien Notion
+   - **Fichier synthèse en pièce jointe** (drag & drop pour NotebookLM)
+   - Instructions podcast
 
-Consultez [TROUBLESHOOTING_PERPLEXITY.md](TROUBLESHOOTING_PERPLEXITY.md) pour:
-- Erreur 401 (authentification)
-- Erreur 403 (permissions)
-- Erreur 429 (limite de débit)
-- Erreur 500 (serveur)
-- Timeout de connexion
+## 🎙️ NotebookLM Integration
 
-### Diagnostic
+La synthèse est automatiquement jointe au mail. Pour générer un podcast:
 
-```bash
-# Valider configuration et chemins
-python validate.py
+1. Ouvrez l'email de notification
+2. Téléchargez la pièce jointe
+3. Allez sur [NotebookLM](https://notebooklm.google.com)
+4. Drag & drop le fichier ou copiez-collez son contenu
+5. Cliquez "Audio Overview" pour générer le podcast
 
-# Tester API Perplexity
-python test_perplexity.py
+Voir [NOTEBOOKLM_SETUP.md](NOTEBOOKLM_SETUP.md) pour plus de détails.
 
-# Voir le rapport complet des corrections
-cat VERIFICATION_REPORT.md
-```
+## 📚 Documentation
 
-## Améliorations récentes
+- **[INSTALLATION.md](INSTALLATION.md)** - Guide d'installation complet
+- **[QUICKSTART.md](QUICKSTART.md)** - Démarrage en 5 minutes
+- **[GITHUB_SECRETS.md](GITHUB_SECRETS.md)** - Configuration secrets GitHub
+- **[NOTEBOOKLM_SETUP.md](NOTEBOOKLM_SETUP.md)** - Intégration NotebookLM
 
-- ✅ Chemins absolus pour tous les fichiers
-- ✅ Configuration sécurisée (variables d'env)
-- ✅ Retry automatique avec backoff exponentiel
-- ✅ Gestion détaillée des erreurs API
-- ✅ Validation de configuration au démarrage
-- ✅ Scripts de test et diagnostic
+## 🔒 Sécurité
 
-## Sécurité
-
-⚠️ **Important** : Ne jamais commiter les fichiers sensibles:
-- `config/config.py` (contient les clés API)
+⚠️ **Important** - Ne jamais commiter:
+- `config/config.py` (clés API)
+- `email_sources.txt` (adresses sensibles)
 - `src/newsletter_automation/credentials.json` (OAuth)
 - `src/newsletter_automation/token.json` (Token Gmail)
-- `src/newsletter_automation/syntheses/` (Synthèses générées)
 
 Ces fichiers sont automatiquement ignorés par `.gitignore`.
 
-Seul `config/config.example.py` est commité pour servir de template.
+Seuls les fichiers `.example` sont committes.
 
-## Licence
+## 💡 Améliorations récentes
+
+- ✅ **Pièce jointe automatique** - Synthèse jointe au mail
+- ✅ **Configuration simplifiée** - Email sources en fichier `.txt`
+- ✅ **Synthèses structurées** - Sections, listes à puces, données
+- ✅ **2 emails par source** - Meilleure couverture
+- ✅ **Nettoyage auto** - Retrait INBOX/NOTIFICATIONS
+- ✅ **GitHub Actions** - Automatisation complète
+- ✅ **Documentation complète** - Guides détaillés
+
+## 🤝 Contribution
+
+Les contributions sont bienvenues ! Voir [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 📄 Licence
 
 MIT
+
+---
+
+**Questions ?** Consultez la documentation ou créez une [issue](https://github.com/Ayhzer/newsletter-automation/issues).

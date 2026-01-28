@@ -18,6 +18,9 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 import requests
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -44,8 +47,12 @@ NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
 if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATION_EMAIL]):
     print('⚙️  Variables d\'environnement non trouvées, chargement de config.py...')
     
-    config_dir = BASE_DIR.parent.parent / 'config'
-    config_file = config_dir / 'config.py'
+    # Essayer d'abord le chemin relatif au répertoire courant (GitHub Actions)
+    config_file = Path('config') / 'config.py'
+    if not config_file.exists():
+        # Sinon utiliser le chemin absolu (développement local)
+        config_dir = BASE_DIR.parent.parent / 'config'
+        config_file = config_dir / 'config.py'
     
     if not config_file.exists():
         raise FileNotFoundError(
@@ -67,12 +74,44 @@ if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATIO
     NOTION_TOKEN = CONFIG['NOTION_TOKEN']
     NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
     NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
-    EMAIL_SOURCES = CONFIG['EMAIL_SOURCES']
 else:
     print('✅ Variables d\'environnement chargées (GitHub Actions mode)')
-    # Pour GitHub Actions, définir EMAIL_SOURCES depuis env ou utiliser une valeur par défaut
-    EMAIL_SOURCES = os.environ.get('EMAIL_SOURCES', '').split(',') if os.environ.get('EMAIL_SOURCES') else []
     SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+
+# ==================== CHARGEMENT EMAIL SOURCES ====================
+# Charger la liste des emails sources depuis un fichier texte
+def load_email_sources():
+    """Charge les adresses email des newsletters depuis email_sources.txt"""
+    email_sources = []
+    
+    # Essayer d'abord le chemin relatif (GitHub Actions)
+    sources_file = Path('email_sources.txt')
+    if not sources_file.exists():
+        # Sinon utiliser le chemin absolu (développement local)
+        sources_file = BASE_DIR.parent.parent / 'email_sources.txt'
+    
+    if sources_file.exists():
+        print(f'📧 Chargement des emails sources depuis: {sources_file}')
+        with open(sources_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # Ignorer les lignes vides et les commentaires
+                if line and not line.startswith('#'):
+                    email_sources.append(line)
+        
+        if email_sources:
+            print(f'✅ {len(email_sources)} source(s) email chargée(s)')
+            return email_sources
+        else:
+            print('⚠️  Aucune email source trouvée dans le fichier')
+            return []
+    else:
+        print(f'⚠️  Fichier email_sources.txt non trouvé')
+        print(f'   Créez-le à partir de email_sources.example.txt:')
+        print(f'   cp email_sources.example.txt email_sources.txt')
+        return []
+
+EMAIL_SOURCES = load_email_sources()
 
 # Créer un objet CONFIG pour compatibilité avec le reste du code
 CONFIG = {
@@ -93,30 +132,90 @@ def get_gmail_service():
     print('🔐 Authentification Gmail...')
     
     creds = None
-    # Le fichier token.json stocke les tokens d'accès
     token_path = BASE_DIR / 'token.json'
-    creds = None
+    
+    # Mode GitHub Actions : utiliser les secrets
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        print('📍 Mode GitHub Actions détecté')
+        
+        # Priorité 1 : Token OAuth pré-généré (stocké en secret)
+        token_json_env = os.environ.get('GOOGLE_OAUTH_TOKEN_JSON')
+        if token_json_env:
+            print('✅ Token OAuth trouvé dans GOOGLE_OAUTH_TOKEN_JSON')
+            import tempfile
+            import json
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                f.write(token_json_env)
+                temp_token_path = f.name
+            
+            try:
+                creds = Credentials.from_authorized_user_file(temp_token_path, SCOPES)
+                return build('gmail', 'v1', credentials=creds)
+            finally:
+                os.unlink(temp_token_path)
+        
+        # Priorité 2 : Credentials JSON avec refresh token
+        google_credentials_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+        if not google_credentials_json:
+            raise FileNotFoundError(
+                "Ni GOOGLE_OAUTH_TOKEN_JSON ni GOOGLE_CREDENTIALS_JSON trouvés.\n"
+                "Ajoutez l'un d'eux dans GitHub Settings → Secrets:\n"
+                "- GOOGLE_OAUTH_TOKEN_JSON: Token OAuth pré-généré (recommandé)\n"
+                "- GOOGLE_CREDENTIALS_JSON: fichier credentials.json avec refresh_token"
+            )
+        
+        print('✅ Credentials JSON trouvées, tentative d\'authentification...')
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(google_credentials_json)
+            temp_credentials_path = f.name
+        
+        try:
+            # Essayer d'abord le mode sans navigateur
+            flow = InstalledAppFlow.from_client_secrets_file(
+                temp_credentials_path, SCOPES)
+            # Mode sans navigateur pour GitHub Actions
+            creds = flow.run_local_server(port=0, open_browser=False)
+            print('⚠️  Authentification manuelle requise. Visitez l\'URL ci-dessus.')
+            return build('gmail', 'v1', credentials=creds)
+        finally:
+            os.unlink(temp_credentials_path)
+    
+    # Mode développement local
+    print('📍 Mode développement local')
+    
+    # Essayer de charger le token existant
     if token_path.exists():
+        print('✅ Token local trouvé, chargement...')
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
     
     # Si pas de credentials valides, on lance l'authentification
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            print('🔄 Rafraîchissement du token...')
             creds.refresh(Request())
         else:
+            credentials_file = BASE_DIR / 'credentials.json'
+            if not credentials_file.exists():
+                raise FileNotFoundError(
+                    f"Fichier {credentials_file} non trouvé.\n"
+                    f"Créez-le en suivant : https://developers.google.com/gmail/api/quickstart/python"
+                )
+            print('🌐 Ouverture du navigateur pour authentification...')
             flow = InstalledAppFlow.from_client_secrets_file(
-                str(BASE_DIR / 'credentials.json'), SCOPES)
+                str(credentials_file), SCOPES)
             creds = flow.run_local_server(port=0)
         
         # Sauvegarder les credentials
         with open(str(token_path), 'w', encoding='utf-8') as token:
             token.write(creds.to_json())
+        print('💾 Token sauvegardé')
     
     return build('gmail', 'v1', credentials=creds)
 
 
 def fetch_newsletters(service):
-    """Récupère les newsletters non lues des dernières 24h"""
+    """Récupère les newsletters non lues des dernières 24h (max 2 par source)"""
     print('📧 Récupération des emails...')
     
     # Construire la requête de recherche
@@ -127,7 +226,7 @@ def fetch_newsletters(service):
     results = service.users().messages().list(
         userId='me',
         q=query,
-        maxResults=50
+        maxResults=100
     ).execute()
     
     messages = results.get('messages', [])
@@ -187,7 +286,22 @@ def fetch_newsletters(service):
             'content': content
         })
     
-    return emails
+    # Limiter à 2 emails par source
+    emails_by_source = {}
+    for email in emails:
+        from_addr = email['from']
+        if from_addr not in emails_by_source:
+            emails_by_source[from_addr] = []
+        emails_by_source[from_addr].append(email)
+    
+    # Garder seulement les 2 derniers de chaque source
+    filtered_emails = []
+    for from_addr, email_list in emails_by_source.items():
+        filtered_emails.extend(email_list[:2])  # Les premiers 2 (Gmail retourne les plus récents d'abord)
+    
+    print(f'📩 {len(filtered_emails)} email(s) sélectionné(s) après filtrage (max 2 par source)')
+    
+    return filtered_emails
 
 
 def get_or_create_label(service, label_name):
@@ -213,7 +327,7 @@ def get_or_create_label(service, label_name):
 
 
 def mark_emails_as_read_and_label(service, email_ids, label_name='newletterinnotion'):
-    """Marque les emails comme lus et les déplace dans un libellé"""
+    """Marque les emails comme lus, les déplace dans un libellé et les retire de la boite de réception"""
     print('✓ Marquage des emails comme lus...')
     
     # Obtenir ou créer le libellé
@@ -224,12 +338,12 @@ def mark_emails_as_read_and_label(service, email_ids, label_name='newletterinnot
         userId='me',
         body={
             'ids': email_ids,
-            'removeLabelIds': ['UNREAD'],
+            'removeLabelIds': ['UNREAD', 'INBOX', 'IMPORTANT'],
             'addLabelIds': [label_id]
         }
     ).execute()
     
-    print(f'✅ Emails marqués comme lus et étiquetés "{label_name}"')
+    print(f'✅ Emails marqués comme lus, étiquetés "{label_name}" et retirés de la boite de réception')
 
 
 def send_notification(service, notion_url, synthesis_path, emails=None, notebooklm_url=None):
@@ -255,7 +369,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         <ol>
             <li>Allez sur <a href="{notebooklm_url}">NotebookLM</a></li>
             <li>Créez un nouveau notebook</li>
-            <li>Importez ce fichier: <code>{synthesis_path}</code></li>
+            <li>✅ <strong>Fichier joint</strong> - Drag & drop directement dans NotebookLM !</li>
             <li>Cliquez sur "Audio Overview" pour générer le podcast</li>
         </ol>
         '''
@@ -266,7 +380,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         <h2 style="color: #2ecc71;">✅ Votre synthèse quotidienne est prête !</h2>
         
         <p><strong>📝 Notion:</strong> <a href="{notion_url}">Voir la page Notion</a></p>
-        <p><strong>📄 Fichier synthèse:</strong> {synthesis_path}</p>
+        <p><strong>📎 Fichier synthèse:</strong> Joint à cet email</p>
         
         <hr style="margin: 20px 0;">
         
@@ -275,19 +389,19 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         <h3>📋 Ressources disponibles :</h3>
         <ul>
             <li><a href="{notion_url}">📖 Lire la synthèse Notion</a> - Accès rapide et structuré</li>
-            <li>📄 <strong>Fichier texte</strong> - Pour importer dans d'autres outils</li>
+            <li>📎 <strong>Fichier texte en pièce jointe</strong> - Prêt à copier-coller dans NotebookLM</li>
         </ul>
         
         {notebooklm_section}
         
         <hr style="margin: 20px 0;">
         
-        <h3>💡 Astuce :</h3>
+        <h3>💡 Utilisation rapide :</h3>
         <p>Pour convertir cette synthèse en podcast :</p>
         <ol>
             <li>Ouvrez <a href="https://notebooklm.google.com">NotebookLM</a></li>
             <li>Créez un nouveau notebook</li>
-            <li>Importez le fichier synthèse (drag & drop ou upload)</li>
+            <li><strong>Drag & drop le fichier joint</strong> ou copiez-collez son contenu</li>
             <li>NotebookLM générera automatiquement un "Audio Overview"</li>
         </ol>
         
@@ -298,9 +412,29 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     </html>
     """
     
-    message = MIMEText(html_content, 'html')
+    # Créer un message multipart pour inclure la pièce jointe
+    message = MIMEMultipart()
+    message['from'] = 'me'
     message['to'] = CONFIG['NOTIFICATION_EMAIL']
     message['subject'] = '✅ Votre synthèse newsletter est prête !'
+    
+    # Ajouter le contenu HTML
+    message.attach(MIMEText(html_content, 'html'))
+    
+    # Ajouter la pièce jointe si le fichier existe
+    if os.path.exists(synthesis_path):
+        try:
+            filename = os.path.basename(synthesis_path)
+            with open(synthesis_path, 'rb') as attachment:
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(attachment.read())
+            
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename={filename}')
+            message.attach(part)
+            print(f'  📎 Pièce jointe ajoutée: {filename}')
+        except Exception as e:
+            print(f'  ⚠️  Erreur lors de l\'ajout de la pièce jointe: {e}')
     
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
     
@@ -309,7 +443,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         body={'raw': raw_message}
     ).execute()
     
-    print('✅ Notification envoyée')
+    print('✅ Notification envoyée avec pièce jointe')
 
 
 # ==================== FONCTION PERPLEXITY ====================
@@ -329,13 +463,29 @@ def synthesize_with_perplexity(emails, max_retries=3):
         for email in emails
     ])
     
-    prompt = f"""Tu es un assistant qui synthétise des newsletters tech en français.
+    prompt = f"""Tu es un assistant expert qui synthétise des newsletters tech en français de manière très structurée et détaillée.
 
-Voici les newsletters reçues aujourd'hui. Crée une synthèse détaillée, structurée et en français de l'ensemble de ces contenus.
+Crée une synthèse complète des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format:
 
-Organise la synthèse par thèmes principaux (technologies, véhicules électriques, actualités tech, etc.) et présente les informations de manière claire et digeste.
+## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
 
-NEWSLETTERS:
+Pour chaque thème principal trouvé, crée une section avec:
+- **Titre du thème** (ex: IA et Machine Learning, Cloud et Infrastructure, etc.)
+- Une **introduction** courte présentant le sujet
+- Une liste de **points clés** (utilise • pour chaque point important)
+- Les **éléments à retenir** avec impact ou implications
+- Les **chiffres ou données** pertinents s'il y en a
+
+Structure générale demandée:
+1. **Section résumé exécutif** (ce qu'il faut retenir en 3-4 points clés)
+2. **Sections thématiques principales** (groupées par domaine/sujet)
+3. **Tendances émergentes** (si identifiées)
+4. **Impacts et implications** (ce que cela signifie pour vous)
+
+Sois très détaillé, utilise des sous-titres clairs, et rends le texte facile à scanner.
+Ajoute des emojis pertinents pour améliorer la lisibilité.
+
+NEWSLETTERS À SYNTHÉTISER:
 {emails_text}"""
     
     # Appel API Perplexity avec retry et gestion d'erreurs améliorée

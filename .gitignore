@@ -20,6 +20,7 @@ src/newsletter_automation/syntheses/
 # Secrets / credentials (NE JAMAIS PUSH)
 credentials/
 config/config.py
+email_sources.txt
 src/newsletter_automation/credentials.json
 src/newsletter_automation/token.json
 token.json
