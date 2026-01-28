@@ -1,0 +1,9 @@
+# Liste des adresses email des newsletters à traiter
+# Une adresse par ligne
+# Les lignes vides et les lignes commençant par # sont ignorées
+
+newsletter@techmeme.com
+newsletter@update.insideevs.com
+dan@tldrnewsletter.com
+noreply@medium.com
+newsletter@critical.insideevs.com
