@@ -74,12 +74,44 @@ if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATIO
     NOTION_TOKEN = CONFIG['NOTION_TOKEN']
     NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
     NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
-    EMAIL_SOURCES = CONFIG['EMAIL_SOURCES']
 else:
     print('✅ Variables d\'environnement chargées (GitHub Actions mode)')
-    # Pour GitHub Actions, définir EMAIL_SOURCES depuis env ou utiliser une valeur par défaut
-    EMAIL_SOURCES = os.environ.get('EMAIL_SOURCES', '').split(',') if os.environ.get('EMAIL_SOURCES') else []
     SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+
+# ==================== CHARGEMENT EMAIL SOURCES ====================
+# Charger la liste des emails sources depuis un fichier texte
+def load_email_sources():
+    """Charge les adresses email des newsletters depuis email_sources.txt"""
+    email_sources = []
+    
+    # Essayer d'abord le chemin relatif (GitHub Actions)
+    sources_file = Path('email_sources.txt')
+    if not sources_file.exists():
+        # Sinon utiliser le chemin absolu (développement local)
+        sources_file = BASE_DIR.parent.parent / 'email_sources.txt'
+    
+    if sources_file.exists():
+        print(f'📧 Chargement des emails sources depuis: {sources_file}')
+        with open(sources_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # Ignorer les lignes vides et les commentaires
+                if line and not line.startswith('#'):
+                    email_sources.append(line)
+        
+        if email_sources:
+            print(f'✅ {len(email_sources)} source(s) email chargée(s)')
+            return email_sources
+        else:
+            print('⚠️  Aucune email source trouvée dans le fichier')
+            return []
+    else:
+        print(f'⚠️  Fichier email_sources.txt non trouvé')
+        print(f'   Créez-le à partir de email_sources.example.txt:')
+        print(f'   cp email_sources.example.txt email_sources.txt')
+        return []
+
+EMAIL_SOURCES = load_email_sources()
 
 # Créer un objet CONFIG pour compatibilité avec le reste du code
 CONFIG = {

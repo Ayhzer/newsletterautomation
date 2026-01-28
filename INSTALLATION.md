@@ -131,6 +131,8 @@ pip install -r requirements.txt
 
 ## 📋 Étape 3 : Configuration du projet
 
+### 3.1 Configuration des paramètres
+
 ```bash
 # Copier le fichier exemple
 cp config/config.example.py config/config.py
@@ -140,24 +142,35 @@ cp config/config.example.py config/config.py
 
 ```python
 CONFIG = {
-    # 1. Adresses des newsletters
-    "EMAIL_SOURCES": [
-        "newsletter@techmeme.com",
-        "newsletter@example.com",
-        # Ajouter les vôtres ici
-    ],
-    
-    # 2. Perplexity (déjà copié depuis l'étape 2.2)
+    # Perplexity (clé de l'étape 2.2)
     "PERPLEXITY_API_KEY": "pplx-...",
     
-    # 3. Notion (tokens de l'étape 2.3)
+    # Notion (tokens de l'étape 2.3)
     "NOTION_TOKEN": "ntn_...",
     "NOTION_PARENT_PAGE_ID": "xxxxx...",
     
-    # 4. Email pour les notifications
+    # Email pour les notifications
     "NOTIFICATION_EMAIL": "votre.email@gmail.com",
 }
 ```
+
+### 3.2 Configuration des sources email
+
+```bash
+# Copier le fichier exemple
+cp email_sources.example.txt email_sources.txt
+```
+
+Éditez `email_sources.txt` et ajoutez les adresses email des newsletters à traiter (une par ligne) :
+
+```
+newsletter@techmeme.com
+newsletter@example.com
+votre.newsletter@another-domain.com
+```
+
+Les lignes vides et les lignes commençant par `#` sont ignorées.
+````
 
 ## ✅ Étape 4 : Tester
 

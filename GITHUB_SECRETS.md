@@ -114,22 +114,30 @@ Secret value: jean.dupont@gmail.com
 
 ---
 
-### 5. EMAIL_SOURCES (Optionnel mais Recommandé)
+## 📧 Configuration des Sources Email (email_sources.txt)
 
-**Syntaxe:** `email1@example.com,email2@example.com,email3@example.com` (séparées par des virgules)
+**Note importante:** Les adresses email des newsletters à traiter ne sont **PAS** des secrets. Elles sont chargées depuis un fichier texte `email_sources.txt` au lieu des secrets GitHub.
 
-**Description:** Les adresses email des newsletters que vous voulez traiter
+### Configuration locale (développement):
+```bash
+cp email_sources.example.txt email_sources.txt
+# Modifiez email_sources.txt et ajoutez vos adresses email
+```
 
-**Exemple:**
-```
-newsletter@techmeme.com,newsletter@insideevs.com,dan@tldrnewsletter.com,noreply@medium.com
+### Configuration GitHub Actions:
+Pour que le workflow GitHub fonctionne, vous devez ajouter le fichier `email_sources.txt` à votre repository.
+
+**Option 1: Pousser le fichier (simple)**
+```bash
+cp email_sources.example.txt email_sources.txt
+# Modifiez email_sources.txt avec vos sources
+git add email_sources.txt
+git commit -m "Add email sources configuration"
+git push
 ```
 
-**À saisir dans GitHub:**
-```
-Secret name: EMAIL_SOURCES
-Secret value: newsletter@techmeme.com,newsletter@insideevs.com,dan@tldrnewsletter.com,noreply@medium.com
-```
+**Option 2: Créer le fichier via le workflow (avancé)**
+Si vous ne voulez pas committer le fichier, créez le fichier dans votre workflow GitHub Actions via un secret GitHub nommé `EMAIL_SOURCES_CONTENT` avec un format spécifique.
 
 ---
 
@@ -212,7 +220,7 @@ Avant de lancer le workflow:
 - [ ] **NOTION_TOKEN** - Saisi et commence par `ntn_`
 - [ ] **NOTION_PARENT_PAGE_ID** - Saisi (32 caractères)
 - [ ] **NOTIFICATION_EMAIL** - Saisi (format email valide)
-- [ ] **EMAIL_SOURCES** - Saisi (emails séparées par des virgules)
+- [ ] **email_sources.txt** - Créé et configuré avec vos adresses email
 - [ ] **GOOGLE_OAUTH_TOKEN_JSON** OU **GOOGLE_CREDENTIALS_JSON** - L'un des deux saisi (format JSON complet)
 
 ---
