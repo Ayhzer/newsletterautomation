@@ -382,6 +382,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     
     # Créer un message multipart pour inclure la pièce jointe
     message = MIMEMultipart()
+    message['from'] = 'me'
     message['to'] = CONFIG['NOTIFICATION_EMAIL']
     message['subject'] = '✅ Votre synthèse newsletter est prête !'
     
@@ -397,7 +398,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
                 part.set_payload(attachment.read())
             
             encoders.encode_base64(part)
-            part.add_header('Content-Disposition', f'attachment; filename= {filename}')
+            part.add_header('Content-Disposition', f'attachment; filename={filename}')
             message.attach(part)
             print(f'  📎 Pièce jointe ajoutée: {filename}')
         except Exception as e:
