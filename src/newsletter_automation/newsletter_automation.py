@@ -180,7 +180,7 @@ def get_gmail_service():
 
 
 def fetch_newsletters(service):
-    """Récupère les newsletters non lues des dernières 24h"""
+    """Récupère les newsletters non lues des dernières 24h (max 2 par source)"""
     print('📧 Récupération des emails...')
     
     # Construire la requête de recherche
@@ -191,7 +191,7 @@ def fetch_newsletters(service):
     results = service.users().messages().list(
         userId='me',
         q=query,
-        maxResults=50
+        maxResults=100
     ).execute()
     
     messages = results.get('messages', [])
@@ -251,7 +251,22 @@ def fetch_newsletters(service):
             'content': content
         })
     
-    return emails
+    # Limiter à 2 emails par source
+    emails_by_source = {}
+    for email in emails:
+        from_addr = email['from']
+        if from_addr not in emails_by_source:
+            emails_by_source[from_addr] = []
+        emails_by_source[from_addr].append(email)
+    
+    # Garder seulement les 2 derniers de chaque source
+    filtered_emails = []
+    for from_addr, email_list in emails_by_source.items():
+        filtered_emails.extend(email_list[:2])  # Les premiers 2 (Gmail retourne les plus récents d'abord)
+    
+    print(f'📩 {len(filtered_emails)} email(s) sélectionné(s) après filtrage (max 2 par source)')
+    
+    return filtered_emails
 
 
 def get_or_create_label(service, label_name):
