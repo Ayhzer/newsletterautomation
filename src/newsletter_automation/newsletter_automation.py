@@ -18,6 +18,9 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 import requests
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -334,7 +337,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         <ol>
             <li>Allez sur <a href="{notebooklm_url}">NotebookLM</a></li>
             <li>Créez un nouveau notebook</li>
-            <li>Importez ce fichier: <code>{synthesis_path}</code></li>
+            <li>✅ <strong>Fichier joint</strong> - Drag & drop directement dans NotebookLM !</li>
             <li>Cliquez sur "Audio Overview" pour générer le podcast</li>
         </ol>
         '''
@@ -345,7 +348,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         <h2 style="color: #2ecc71;">✅ Votre synthèse quotidienne est prête !</h2>
         
         <p><strong>📝 Notion:</strong> <a href="{notion_url}">Voir la page Notion</a></p>
-        <p><strong>📄 Fichier synthèse:</strong> {synthesis_path}</p>
+        <p><strong>📎 Fichier synthèse:</strong> Joint à cet email</p>
         
         <hr style="margin: 20px 0;">
         
@@ -354,19 +357,19 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         <h3>📋 Ressources disponibles :</h3>
         <ul>
             <li><a href="{notion_url}">📖 Lire la synthèse Notion</a> - Accès rapide et structuré</li>
-            <li>📄 <strong>Fichier texte</strong> - Pour importer dans d'autres outils</li>
+            <li>📎 <strong>Fichier texte en pièce jointe</strong> - Prêt à copier-coller dans NotebookLM</li>
         </ul>
         
         {notebooklm_section}
         
         <hr style="margin: 20px 0;">
         
-        <h3>💡 Astuce :</h3>
+        <h3>💡 Utilisation rapide :</h3>
         <p>Pour convertir cette synthèse en podcast :</p>
         <ol>
             <li>Ouvrez <a href="https://notebooklm.google.com">NotebookLM</a></li>
             <li>Créez un nouveau notebook</li>
-            <li>Importez le fichier synthèse (drag & drop ou upload)</li>
+            <li><strong>Drag & drop le fichier joint</strong> ou copiez-collez son contenu</li>
             <li>NotebookLM générera automatiquement un "Audio Overview"</li>
         </ol>
         
@@ -377,9 +380,28 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     </html>
     """
     
-    message = MIMEText(html_content, 'html')
+    # Créer un message multipart pour inclure la pièce jointe
+    message = MIMEMultipart()
     message['to'] = CONFIG['NOTIFICATION_EMAIL']
     message['subject'] = '✅ Votre synthèse newsletter est prête !'
+    
+    # Ajouter le contenu HTML
+    message.attach(MIMEText(html_content, 'html'))
+    
+    # Ajouter la pièce jointe si le fichier existe
+    if os.path.exists(synthesis_path):
+        try:
+            filename = os.path.basename(synthesis_path)
+            with open(synthesis_path, 'rb') as attachment:
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(attachment.read())
+            
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename= {filename}')
+            message.attach(part)
+            print(f'  📎 Pièce jointe ajoutée: {filename}')
+        except Exception as e:
+            print(f'  ⚠️  Erreur lors de l\'ajout de la pièce jointe: {e}')
     
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
     
@@ -388,7 +410,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         body={'raw': raw_message}
     ).execute()
     
-    print('✅ Notification envoyée')
+    print('✅ Notification envoyée avec pièce jointe')
 
 
 # ==================== FONCTION PERPLEXITY ====================
