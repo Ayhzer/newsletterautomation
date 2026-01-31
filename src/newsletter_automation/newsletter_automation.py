@@ -43,39 +43,59 @@ NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_PARENT_PAGE_ID = os.environ.get('NOTION_PARENT_PAGE_ID')
 NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
 
-# Si les variables d'environnement ne sont pas définies, charger config.py
+# Vérifier si on est en mode GitHub Actions (présence de variables GitHub)
+IS_GITHUB_ACTIONS = any(var in os.environ for var in ['GITHUB_ACTIONS', 'GITHUB_RUN_ID', 'CI'])
+
+# Si les variables d'environnement ne sont pas définies ET qu'on n'est pas en GitHub Actions, charger config.py
 if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATION_EMAIL]):
-    print('⚙️  Variables d\'environnement non trouvées, chargement de config.py...')
-    
-    # Essayer d'abord le chemin relatif au répertoire courant (GitHub Actions)
-    config_file = Path('config') / 'config.py'
-    if not config_file.exists():
-        # Sinon utiliser le chemin absolu (développement local)
-        config_dir = BASE_DIR.parent.parent / 'config'
-        config_file = config_dir / 'config.py'
-    
-    if not config_file.exists():
-        raise FileNotFoundError(
-            f"Fichier config/config.py non trouvé à {config_file}\n"
-            f"Créez-le à partir de config/config.example.py:\n"
-            f"  cp config/config.example.py config/config.py"
+    if IS_GITHUB_ACTIONS:
+        # En GitHub Actions, les variables d'environnement sont obligatoires
+        missing_vars = [
+            var for var in ['PERPLEXITY_API_KEY', 'NOTION_TOKEN', 'NOTION_PARENT_PAGE_ID', 'NOTIFICATION_EMAIL']
+            if not os.environ.get(var)
+        ]
+        raise ValueError(
+            f"⚠️  GitHub Actions mode détecté mais variables d'environnement manquantes:\n"
+            f"  {', '.join(missing_vars)}\n"
+            f"Veuillez les configurer dans les secrets GitHub."
         )
-    
-    # Charger le fichier config.py
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("config_module", config_file)
-    config_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config_module)
-    
-    CONFIG = config_module.CONFIG
-    SCOPES = config_module.SCOPES
-    
-    PERPLEXITY_API_KEY = CONFIG['PERPLEXITY_API_KEY']
-    NOTION_TOKEN = CONFIG['NOTION_TOKEN']
-    NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
-    NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
+    else:
+        # Mode développement local : charger depuis config.py
+        print('⚙️  Variables d\'environnement non trouvées, chargement de config.py...')
+        
+        # Essayer d'abord le chemin relatif au répertoire courant
+        config_file = Path('config') / 'config.py'
+        if not config_file.exists():
+            # Sinon utiliser le chemin absolu (développement local)
+            config_dir = BASE_DIR.parent.parent / 'config'
+            config_file = config_dir / 'config.py'
+        
+        if not config_file.exists():
+            raise FileNotFoundError(
+                f"Fichier config/config.py non trouvé à {config_file}\n"
+                f"Créez-le à partir de config/config.example.py:\n"
+                f"  cp config/config.example.py config/config.py"
+            )
+        
+        # Charger le fichier config.py
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("config_module", config_file)
+        config_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config_module)
+        
+        CONFIG = config_module.CONFIG
+        SCOPES = config_module.SCOPES
+        
+        PERPLEXITY_API_KEY = CONFIG['PERPLEXITY_API_KEY']
+        NOTION_TOKEN = CONFIG['NOTION_TOKEN']
+        NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
+        NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
 else:
-    print('✅ Variables d\'environnement chargées (GitHub Actions mode)')
+    print('✅ Variables d\'environnement chargées')
+    if IS_GITHUB_ACTIONS:
+        print('   (Mode GitHub Actions)')
+    else:
+        print('   (Mode développement local)')
     SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
 # ==================== CHARGEMENT EMAIL SOURCES ====================
