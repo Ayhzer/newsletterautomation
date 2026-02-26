@@ -31,7 +31,7 @@ prompts:
     enabled: true
     frequency: "weekly"
     page_title: "veille réglementaire hebdo IT santé"
-    parent_page_id: "2f972b81f9ed808cba5ae854c51f6b2b"
+    parent_page_id: ""
     prompt: |
      Synthèse très détaillée de veille réglementaire hebdo IT santé
      France : HDS, PGSSI-S, RNIV, LAP, EHDS NIS2 et autres dispositifs.
@@ -49,7 +49,7 @@ prompts:
     enabled: true
     frequency: "daily"
     page_title: "Veille cybersécurité en Santé"
-    parent_page_id: "2f972b81f9ed808cba5ae854c51f6b2b"
+    parent_page_id: ""
     prompt: |
       Synthèse très détaillée d'une alertes quotidiennes cybersécurité ANSSI CERT-FR
       hôpitaux France incidents SIH.
@@ -65,7 +65,7 @@ prompts:
 #     enabled: true
 #     frequency: "monthly"
 #     page_title: "Synthèse Mensuelle - Études Cliniques et Recherche"
-#     parent_page_id: "2f972b81f9ed808cba5ae854c51f6b2b"
+#     parent_page_id: ""
 #     prompt: |
 #       Tu es expert en recherche clinique et médecine factuelle.
 
