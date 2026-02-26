@@ -121,9 +121,16 @@ def load_config() -> Dict:
 # ==================== SCHEDULING ====================
 
 def should_run_prompt(prompt_key: str, prompt_config: Dict, last_run_file: Path) -> bool:
-    """Vérifie si un prompt doit être exécuté selon sa fréquence"""
+    """Vérifie si un prompt doit être exécuté selon sa fréquence.
+    Si FORCE_RUN=true est défini en variable d'environnement, ignore les fréquences.
+    """
     if not prompt_config.get('enabled', False):
         return False
+
+    # Mode force : ignore les fréquences (utile pour les tests)
+    if os.environ.get('FORCE_RUN', '').lower() == 'true':
+        print(f'  FORCE_RUN activé, exécution forcée de {prompt_key}')
+        return True
 
     frequency = prompt_config.get('frequency', 'daily')
 
