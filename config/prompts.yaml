@@ -1,0 +1,98 @@
+# ==================== CONFIGURATION HEALTHCARE WATCH ====================
+# Ce fichier ne contient pas de secrets et peut être versionné dans Git.
+# Les secrets (API keys, tokens) sont dans les variables d'environnement.
+
+# ==================== PARAMÈTRES GÉNÉRAUX ====================
+general:
+  timezone: "Europe/Paris"
+
+  # Notifications par email (Gmail API OAuth2)
+  # Mettre enabled: false pour désactiver complètement les emails
+  # Requiert: GOOGLE_CREDENTIALS_JSON et GOOGLE_OAUTH_TOKEN_JSON
+  notifications:
+    enabled: true
+    email_on_error: true
+
+# ==================== DÉFINITION DES PROMPTS ====================
+# Chaque prompt = une newsletter indépendante avec sa fréquence
+#
+# Paramètres disponibles :
+#   enabled        : true/false - activer/désactiver ce prompt
+#   frequency      : "daily", "weekly", "monthly", "hourly"
+#   page_title     : Titre affiché dans Notion (la date/heure sera ajoutée)
+#   parent_page_id : ID de la page Notion parente (où les sous-pages seront créées)
+#   prompt         : Le texte envoyé à Perplexity (rédigé comme pour un humain)
+#   options        : Paramètres techniques Perplexity (model, max_tokens, temperature)
+
+prompts:
+
+  # Newsletter hebdomadaire - Veille réglementaire IT Santé
+  weekly_regulatory_news:
+    enabled: true
+    frequency: "weekly"
+    page_title: "veille réglementaire hebdo IT santé"
+    parent_page_id: "2f972b81f9ed808cba5ae854c51f6b2b"
+    prompt: |
+     Synthèse très détaillée de veille réglementaire hebdo IT santé
+     France : HDS, PGSSI-S, RNIV, LAP, EHDS NIS2 et autres dispositifs.
+     Mises à jour normes ISO27001 certification HDS
+     hôpitaux et hébergeurs données santé.
+     Format bien lisible et compréhensible pour intégrer sur une page
+     Notion.
+    options:
+      max_tokens: 2000
+      temperature: 0.3
+      model: "sonar"
+
+  # Newsletter quotidienne - Cybersécurité Santé
+  daily_cybersecurity:
+    enabled: true
+    frequency: "daily"
+    page_title: "Veille cybersécurité en Santé"
+    parent_page_id: "2f972b81f9ed808cba5ae854c51f6b2b"
+    prompt: |
+      Synthèse très détaillée d'une alertes quotidiennes cybersécurité ANSSI CERT-FR
+      hôpitaux France incidents SIH.
+      Format bien lisible et compréhensible pour intégrer sur une page
+      Notion.
+    options:
+      max_tokens: 2000
+      temperature: 0.3
+      model: "sonar"
+
+#   # Newsletter mensuelle - Études Cliniques
+#   monthly_clinical_research:
+#     enabled: true
+#     frequency: "monthly"
+#     page_title: "Synthèse Mensuelle - Études Cliniques et Recherche"
+#     parent_page_id: "2f972b81f9ed808cba5ae854c51f6b2b"
+#     prompt: |
+#       Tu es expert en recherche clinique et médecine factuelle.
+
+#       Crée une synthèse mensuelle des études cliniques importantes avec:
+
+#       ## STRUCTURE DEMANDÉE:
+#       1. **Études marquantes du mois** (nouvelles découvertes majeures)
+#       2. **Méta-analyses et revues systématiques** (synthèses de preuves)
+#       3. **Essais cliniques en cours** (phases I-IV pertinents)
+#       4. **Impact sur les pratiques cliniques** (implications pour la pratique)
+#       5. **Publications d'agences réglementaires** (EMA, FDA, HAS)
+
+#       Réserve des sections pour: niveau de preuve, population étudiée, résultats clés.
+#     options:
+#       max_tokens: 3000
+#       temperature: 0.2
+#       model: "sonar"
+
+# ==================== VARIABLES D'ENVIRONNEMENT REQUISES ====================
+# Les secrets suivants doivent être définis en variables d'environnement (.env)
+# ou dans GitHub Secrets pour CI/CD:
+#
+#   PERPLEXITY_API_KEY          - Clé API Perplexity
+#   NOTION_TOKEN                - Token API Notion
+#   NOTION_PARENT_PAGE_ID       - ID de la page Notion racine (optionnel si défini par prompt)
+#   NOTIFICATION_EMAIL          - Email Gmail pour les notifications
+#   GOOGLE_OAUTH_TOKEN_JSON     - Contenu JSON du fichier token.json (généré après autorisation OAuth2)
+#
+# Note: L'application utilise Gmail API (OAuth2) pour l'envoi d'emails.
+# Voir la documentation pour configurer les credentials Google Cloud.

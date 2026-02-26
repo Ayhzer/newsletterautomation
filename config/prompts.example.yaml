@@ -1,0 +1,122 @@
+# ==================== CONFIGURATION HEALTHCARE WATCH ====================
+# Configuration des prompts Perplexity et des pages Notion associées
+# Ce fichier ne contient pas de secrets et peut être versionné
+
+# ==================== PARAMÈTRES GÉNÉRAUX ====================
+general:
+  # Fuseau horaire pour les horodatages (ex: Europe/Paris, America/New_York)
+  timezone: "Europe/Paris"
+
+  # Notifications par email
+  notifications:
+    enabled: true
+    email_on_error: true   # Envoyer un email si erreur
+
+# ==================== DÉFINITION DES PROMPTS ====================
+# Chaque prompt définit un besoin spécifique avec sa fréquence d'exécution
+prompts:
+
+  # Exemple 1: Newsletter quotidienne - Actualités Santé Générale
+  daily_health_news:
+    enabled: true
+
+    # Fréquence d'exécution: daily, weekly, monthly, etc.
+    frequency: "daily"
+
+    # Titre de la page Notion à créer/mettre à jour
+    page_title: "Actualités Santé Générale"
+
+    # ID de la page parent Notion (où créer les enfants)
+    # Laisser vide pour utiliser NOTION_PARENT_PAGE_ID des env vars
+    parent_page_id: ""
+
+    # Prompt pour Perplexity (texte compréhensible pour un humain)
+    prompt: |
+      Tu es un expert en veille sanitaire qui synthétise l'actualité médicale et de santé publique.
+
+      Récupère et synthétise les dernières actualités médicales et de santé publique avec les éléments suivants:
+
+      ## STRUCTURE DEMANDÉE:
+      1. **Les 5 principales actualités du jour** avec sources
+      2. **Tendances santé émergentes** (changements importants identifiés)
+      3. **Statistiques ou données clés** (épidémiologie, santé publique)
+      4. **Impact sur les professionnels de santé** (si applicable)
+      5. **Recommandations officielles** (OMS, autorités sanitaires)
+
+      Sois factuel, cite les sources, et rends accessible pour un professionnel de santé.
+
+    # Options avancées
+    options:
+      max_tokens: 2000
+      temperature: 0.3
+      model: "sonar"
+
+  # Exemple 2: Newsletter hebdomadaire - Innovation Technologique en Santé
+  weekly_health_tech:
+    enabled: true
+    frequency: "weekly"
+    page_title: "Innovations Technologiques en Santé"
+    parent_page_id: ""
+    prompt: |
+      Tu es expert en digital health et technologie médicale.
+
+      Compile une veille technologique hebdomadaire sur les innovations en santé avec:
+
+      ## STRUCTURE DEMANDÉE:
+      1. **Technologies émergentes** (IA, blockchain, IoT santé, télémédecine)
+      2. **Startups de santé** (nouveaux financement, levées de fonds)
+      3. **Avancées en cybersécurité médicale** (protections données patient)
+      4. **Réglementations digitales** (RGPD, conformité IT santé)
+      5. **Cas d'usage pratiques** (implémentations réussies)
+
+      Format: utilise des bullets pour la clarté, cite les sources.
+    options:
+      max_tokens: 2500
+      temperature: 0.3
+      model: "sonar"
+
+  # Exemple 3: Newsletter mensuelle - Études Cliniques et Recherche
+  monthly_clinical_research:
+    enabled: true
+    frequency: "monthly"
+    page_title: "Synthèse Mensuelle - Études Cliniques et Recherche"
+    parent_page_id: ""
+    prompt: |
+      Tu es expert en recherche clinique et médecine factuelle.
+
+      Crée une synthèse mensuelle des études cliniques importantes avec:
+
+      ## STRUCTURE DEMANDÉE:
+      1. **Études marquantes du mois** (nouvelles découvertes majeures)
+      2. **Méta-analyses et revues systématiques** (synthèses de preuves)
+      3. **Essais cliniques en cours** (phases I-IV pertinents)
+      4. **Impact sur les pratiques cliniques** (implications pour la pratique)
+      5. **Publications d'agences réglementaires** (EMA, FDA, HAS)
+
+      Réserve des sections pour: niveau de preuve, population étudiée, résultats clés.
+    options:
+      max_tokens: 3000
+      temperature: 0.2
+      model: "sonar"
+
+# ==================== SECRETS À CONFIGURER ====================
+# Les secrets suivants doivent être définis en variables d'environnement
+# ou dans GitHub Secrets (voir ci-dessous):
+#
+# Variables d'environnement requises:
+#   PERPLEXITY_API_KEY          - Clé API Perplexity
+#   NOTION_TOKEN                - Token API Notion
+#   NOTION_PARENT_PAGE_ID       - ID de la page Notion racine (optionnel si défini par prompt)
+#   NOTIFICATION_EMAIL          - Email pour les notifications (adresse Gmail)
+#   GOOGLE_OAUTH_TOKEN_JSON     - Contenu JSON du fichier token.json (généré après autorisation OAuth2)
+#
+# Configuration GitHub Secrets (pour CI/CD):
+#   Ajouter dans Settings → Secrets and variables → Actions:
+#   - PERPLEXITY_API_KEY
+#   - NOTION_TOKEN
+#   - NOTION_PARENT_PAGE_ID
+#   - NOTIFICATION_EMAIL
+#   - GOOGLE_OAUTH_TOKEN_JSON
+#
+# Note: L'application utilise Gmail API (OAuth2) pour l'envoi d'emails.
+# Voir la documentation pour configurer les credentials Google Cloud.
