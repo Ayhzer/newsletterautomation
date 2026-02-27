@@ -89,7 +89,7 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           if [ -f "data/output/.last_run.json" ]; then
-            git add data/output/.last_run.json
+            git add -f data/output/.last_run.json
             git diff --cached --quiet || git commit -m "chore: update healthcare-watch execution log - $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push || true
           fi
