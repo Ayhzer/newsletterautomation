@@ -18,7 +18,7 @@ general:
 #
 # Paramètres disponibles :
 #   enabled        : true/false - activer/désactiver ce prompt
-#   frequency      : "daily", "weekly", "monthly", "hourly"
+#   frequency      : "daily", "3days", "weekly", "monthly", "hourly"
 #   page_title     : Titre affiché dans Notion (la date/heure sera ajoutée)
 #   parent_page_id : ID de la page Notion parente (où les sous-pages seront créées)
 #   prompt         : Le texte envoyé à Perplexity (rédigé comme pour un humain)
@@ -44,10 +44,10 @@ prompts:
       temperature: 0.3
       model: "sonar"
 
-  # Newsletter quotidienne - Cybersécurité Santé
+  # Newsletter cybersécurité - tous les 3 jours
   daily_cybersecurity:
     enabled: true
-    frequency: "daily"
+    frequency: "3days"
     page_title: "Veille cybersécurité en Santé"
     parent_page_id: ""
     prompt: |

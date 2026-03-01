@@ -153,6 +153,8 @@ def should_run_prompt(prompt_key: str, prompt_config: Dict, last_run_file: Path)
         return True
     elif frequency == 'daily' and total_seconds >= 86400:
         return True
+    elif frequency == '3days' and total_seconds >= 259200:
+        return True
     elif frequency == 'weekly' and total_seconds >= 604800:
         return True
     elif frequency == 'monthly' and diff.days >= 30:
