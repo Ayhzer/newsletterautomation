@@ -13,6 +13,7 @@ build/
 
 # Données générées
 data/output/
+!data/output/.last_run.json
 data/input/*.tmp
 syntheses/
 src/newsletter_automation/syntheses/
