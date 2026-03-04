@@ -298,8 +298,8 @@ def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
             if response.status_code == 401:
                 raise ValueError('Authentification Gemini échouée (401). Vérifiez GEMINI_API_KEY')
             elif response.status_code == 429:
-                print('  Limite de débit Gemini atteinte, attente 30s...')
-                time.sleep(30)
+                print('  Limite de débit Gemini atteinte, attente 65s...')
+                time.sleep(65)
                 continue
             elif response.status_code >= 500:
                 print('  Erreur serveur Gemini, nouvelle tentative...')

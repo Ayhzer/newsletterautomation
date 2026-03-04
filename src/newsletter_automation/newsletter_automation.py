@@ -626,8 +626,8 @@ NEWSLETTERS À SYNTHÉTISER:
             if response.status_code == 401:
                 raise Exception('ERREUR 401: Authentification échouée. Vérifiez votre GEMINI_API_KEY')
             elif response.status_code == 429:
-                print('  Limite de débit Gemini atteinte, attente 30s...')
-                time.sleep(30)
+                print('  Limite de débit Gemini atteinte, attente 65s...')
+                time.sleep(65)
                 continue
             elif response.status_code != 200:
                 raise Exception(f'Erreur Gemini API: {response.status_code} - {response.text}')
