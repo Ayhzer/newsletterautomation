@@ -71,13 +71,13 @@ def load_config() -> Dict:
 
     # Charger les secrets depuis les variables d'environnement
     perplexity_key = os.environ.get('PERPLEXITY_API_KEY', '')
+    gemini_key = os.environ.get('GEMINI_API_KEY', '')
     notion_token = os.environ.get('NOTION_TOKEN', '')
     notion_parent_page_id = os.environ.get('NOTION_PARENT_PAGE_ID', '')
     notification_email = os.environ.get('NOTIFICATION_EMAIL', '')
 
     # Fallback sur config.py si variables d'environnement manquantes (dev local)
-    # Même pattern que newsletter_automation.py lignes 47-79
-    if not all([perplexity_key, notion_token]):
+    if not all([notion_token]):
         print('Variables env manquantes, tentative de chargement config.py...')
         config_py = CONFIG_DIR / 'config.py'
         if config_py.exists():
@@ -86,23 +86,25 @@ def load_config() -> Dict:
             spec.loader.exec_module(config_module)
             cfg = config_module.CONFIG
             perplexity_key = perplexity_key or cfg.get('PERPLEXITY_API_KEY', '')
+            gemini_key = gemini_key or cfg.get('GEMINI_API_KEY', '')
             notion_token = notion_token or cfg.get('NOTION_TOKEN', '')
             notion_parent_page_id = notion_parent_page_id or cfg.get('NOTION_PARENT_PAGE_ID', '')
             notification_email = notification_email or cfg.get('NOTIFICATION_EMAIL', '')
 
     config['secrets'] = {
         'PERPLEXITY_API_KEY': perplexity_key,
+        'GEMINI_API_KEY': gemini_key,
         'NOTION_TOKEN': notion_token,
         'NOTION_PARENT_PAGE_ID': notion_parent_page_id,
         'NOTIFICATION_EMAIL': notification_email,
         'GOOGLE_OAUTH_TOKEN_JSON': os.environ.get('GOOGLE_OAUTH_TOKEN_JSON', ''),
     }
 
-    # Valider les secrets requis (Perplexity + Notion minimum)
-    required_secrets = ['PERPLEXITY_API_KEY', 'NOTION_TOKEN']
-    missing = [s for s in required_secrets if not config['secrets'].get(s)]
-    if missing:
-        raise ValueError(f"Secrets manquants: {', '.join(missing)}")
+    # Valider les secrets requis : au moins une clé AI + Notion
+    if not perplexity_key and not gemini_key:
+        raise ValueError("Secrets manquants: PERPLEXITY_API_KEY et/ou GEMINI_API_KEY requis")
+    if not notion_token:
+        raise ValueError("Secrets manquants: NOTION_TOKEN")
 
     # Vérifier Gmail API seulement si notifications activées
     notifications_enabled = config.get('general', {}).get('notifications', {}).get('enabled', False)
@@ -258,6 +260,83 @@ def query_perplexity(prompt: str, config: Dict, options: Dict = None) -> str:
             raise
 
     raise Exception('Impossible de contacter Perplexity API après 3 tentatives')
+
+
+# ==================== GEMINI API (FALLBACK) ====================
+
+def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
+    """Interroge l'API Google Gemini avec le prompt fourni (fallback)"""
+    api_key = config['secrets']['GEMINI_API_KEY']
+
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY n'est pas configurée")
+
+    default_options = {'max_tokens': 2000, 'temperature': 0.3}
+    if options:
+        default_options.update(options)
+
+    system_instruction = 'Tu es un expert en domaine sanitaire fournissant des informations factuelles et à jour.'
+    full_prompt = f"{system_instruction}\n\n{prompt}"
+
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
+    payload = {
+        'contents': [{'parts': [{'text': full_prompt}]}],
+        'generationConfig': {
+            'maxOutputTokens': default_options['max_tokens'],
+            'temperature': default_options['temperature']
+        }
+    }
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            print(f'  Appel Gemini (tentative {attempt + 1}/{max_retries})...')
+            response = requests.post(url, json=payload, timeout=60)
+
+            if response.status_code == 401:
+                raise ValueError('Authentification Gemini échouée (401). Vérifiez GEMINI_API_KEY')
+            elif response.status_code == 429:
+                print('  Limite de débit Gemini atteinte, attente 30s...')
+                time.sleep(30)
+                continue
+            elif response.status_code >= 500:
+                print('  Erreur serveur Gemini, nouvelle tentative...')
+                time.sleep(5)
+                continue
+            elif response.status_code != 200:
+                raise ValueError(f'Erreur API Gemini: {response.status_code} - {response.text}')
+
+            data = response.json()
+            synthesis = data['candidates'][0]['content']['parts'][0]['text']
+            print('  Réponse reçue de Gemini')
+            return synthesis
+
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                time.sleep(5)
+                continue
+            raise TimeoutError('Timeout Gemini API')
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(5)
+                continue
+            raise
+
+    raise Exception('Impossible de contacter Gemini API après 3 tentatives')
+
+
+def query_with_fallback(prompt: str, config: Dict, options: Dict = None) -> str:
+    """Tente Perplexity, bascule sur Gemini en cas d'échec"""
+    if config['secrets'].get('PERPLEXITY_API_KEY', '').strip():
+        try:
+            return query_perplexity(prompt, config, options)
+        except Exception as e:
+            print(f'  Perplexity a échoué: {e}')
+            print('  Basculement sur Gemini...')
+    else:
+        print('  PERPLEXITY_API_KEY non configurée, utilisation de Gemini directement.')
+
+    return query_gemini(prompt, config, options)
 
 
 # ==================== NOTION API ====================
@@ -615,10 +694,10 @@ def main():
                     print(f'  Fréquence {freq} non atteinte, skip')
                     continue
 
-                # 1. Interroger Perplexity
+                # 1. Interroger l'IA (Perplexity avec fallback Gemini)
                 prompt_text = prompt_config.get('prompt', '')
                 options = prompt_config.get('options', {})
-                synthesis = query_perplexity(prompt_text, config, options)
+                synthesis = query_with_fallback(prompt_text, config, options)
 
                 # 2. Créer la page Notion
                 page_title = prompt_config.get('page_title', f'Rapport {prompt_key}')
