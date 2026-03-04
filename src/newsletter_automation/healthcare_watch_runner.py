@@ -280,7 +280,7 @@ def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
     system_instruction = 'Tu es un expert en domaine sanitaire fournissant des informations factuelles et à jour.'
     full_prompt = f"{system_instruction}\n\n{prompt}"
 
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}'
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}'
     payload = {
         'contents': [{'parts': [{'text': full_prompt}]}],
         'generationConfig': {

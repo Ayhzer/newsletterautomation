@@ -613,7 +613,7 @@ NEWSLETTERS À SYNTHÉTISER:
 
     for attempt in range(max_retries):
         try:
-            url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
+            url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}'
             payload = {
                 'contents': [{'parts': [{'text': prompt}]}],
                 'generationConfig': {'maxOutputTokens': 4000, 'temperature': 0.2}
