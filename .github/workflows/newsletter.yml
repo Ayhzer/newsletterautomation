@@ -76,6 +76,7 @@ jobs:
       - name: Run Healthcare Watch
         env:
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
           NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
