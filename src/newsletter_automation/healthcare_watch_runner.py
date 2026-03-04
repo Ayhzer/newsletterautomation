@@ -327,11 +327,15 @@ def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
 
 def query_with_fallback(prompt: str, config: Dict, options: Dict = None) -> str:
     """Tente Perplexity, bascule sur Gemini en cas d'échec"""
-    if config['secrets'].get('PERPLEXITY_API_KEY', '').strip():
+    perplexity_key = config['secrets'].get('PERPLEXITY_API_KEY', '').strip()
+    gemini_key = config['secrets'].get('GEMINI_API_KEY', '').strip()
+    print(f'  [fallback] perplexity_key présente: {bool(perplexity_key)}, gemini_key présente: {bool(gemini_key)}')
+
+    if perplexity_key:
         try:
             return query_perplexity(prompt, config, options)
         except Exception as e:
-            print(f'  Perplexity a échoué: {e}')
+            print(f'  Perplexity a échoué ({type(e).__name__}): {e}')
             print('  Basculement sur Gemini...')
     else:
         print('  PERPLEXITY_API_KEY non configurée, utilisation de Gemini directement.')
