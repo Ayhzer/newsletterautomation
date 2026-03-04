@@ -39,6 +39,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # Puis fallback sur config/config.py (pour dev local)
 
 PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_PARENT_PAGE_ID = os.environ.get('NOTION_PARENT_PAGE_ID')
 NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
@@ -70,7 +71,8 @@ if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATIO
     CONFIG = config_module.CONFIG
     SCOPES = config_module.SCOPES
     
-    PERPLEXITY_API_KEY = CONFIG['PERPLEXITY_API_KEY']
+    PERPLEXITY_API_KEY = CONFIG.get('PERPLEXITY_API_KEY')
+    GEMINI_API_KEY = CONFIG.get('GEMINI_API_KEY')
     NOTION_TOKEN = CONFIG['NOTION_TOKEN']
     NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
     NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
@@ -116,6 +118,7 @@ EMAIL_SOURCES = load_email_sources()
 # Créer un objet CONFIG pour compatibilité avec le reste du code
 CONFIG = {
     'PERPLEXITY_API_KEY': PERPLEXITY_API_KEY,
+    'GEMINI_API_KEY': GEMINI_API_KEY,
     'NOTION_TOKEN': NOTION_TOKEN,
     'NOTION_PARENT_PAGE_ID': NOTION_PARENT_PAGE_ID,
     'NOTIFICATION_EMAIL': NOTIFICATION_EMAIL,
@@ -568,6 +571,103 @@ NEWSLETTERS À SYNTHÉTISER:
     raise Exception('Impossible de contacter Perplexity API après plusieurs tentatives')
 
 
+# ==================== FONCTION GEMINI (FALLBACK) ====================
+def synthesize_with_gemini(emails, max_retries=3):
+    """Génère une synthèse avec Google Gemini AI (fallback)"""
+    import time
+    print('🤖 Synthèse avec Gemini (fallback)...')
+
+    api_key = CONFIG.get('GEMINI_API_KEY', '').strip()
+    if not api_key:
+        raise Exception('ERREUR: GEMINI_API_KEY n\'est pas configurée.')
+
+    emails_text = '\n\n'.join([
+        f"### {email['from']} - {email['subject']}\n\n{email['content']}\n\n---"
+        for email in emails
+    ])
+
+    prompt = f"""Tu es un assistant expert qui synthétise des newsletters tech en français de manière très structurée et détaillée.
+
+Crée une synthèse complète des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format:
+
+## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
+
+Pour chaque thème principal trouvé, crée une section avec:
+- **Titre du thème** (ex: IA et Machine Learning, Cloud et Infrastructure, etc.)
+- Une **introduction** courte présentant le sujet
+- Une liste de **points clés** (utilise • pour chaque point important)
+- Les **éléments à retenir** avec impact ou implications
+- Les **chiffres ou données** pertinents s'il y en a
+
+Structure générale demandée:
+1. **Section résumé exécutif** (ce qu'il faut retenir en 3-4 points clés)
+2. **Sections thématiques principales** (groupées par domaine/sujet)
+3. **Tendances émergentes** (si identifiées)
+4. **Impacts et implications** (ce que cela signifie pour vous)
+
+Sois très détaillé, utilise des sous-titres clairs, et rends le texte facile à scanner.
+Ajoute des emojis pertinents pour améliorer la lisibilité.
+
+NEWSLETTERS À SYNTHÉTISER:
+{emails_text}"""
+
+    for attempt in range(max_retries):
+        try:
+            url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
+            payload = {
+                'contents': [{'parts': [{'text': prompt}]}],
+                'generationConfig': {'maxOutputTokens': 4000, 'temperature': 0.2}
+            }
+
+            print(f'  Tentative {attempt + 1}/{max_retries}...')
+            response = requests.post(url, json=payload, timeout=60)
+            print(f'  Réponse API: HTTP {response.status_code}')
+
+            if response.status_code == 401:
+                raise Exception('ERREUR 401: Authentification échouée. Vérifiez votre GEMINI_API_KEY')
+            elif response.status_code == 429:
+                print('  Limite de débit Gemini atteinte, attente 30s...')
+                time.sleep(30)
+                continue
+            elif response.status_code != 200:
+                raise Exception(f'Erreur Gemini API: {response.status_code} - {response.text}')
+
+            data = response.json()
+            synthesis = data['candidates'][0]['content']['parts'][0]['text']
+            print('✅ Synthèse Gemini générée avec succès')
+            return synthesis
+
+        except requests.exceptions.Timeout:
+            print(f'  Timeout (tentative {attempt + 1}/{max_retries})')
+            if attempt < max_retries - 1:
+                time.sleep(5)
+                continue
+            raise Exception('Timeout: Gemini API n\'a pas répondu à temps')
+        except requests.exceptions.ConnectionError as e:
+            print(f'  Erreur de connexion: {e}')
+            if attempt < max_retries - 1:
+                time.sleep(5)
+                continue
+            raise
+
+    raise Exception('Impossible de contacter Gemini API après plusieurs tentatives')
+
+
+# ==================== FONCTION SYNTHÈSE AVEC FALLBACK ====================
+def synthesize_with_fallback(emails):
+    """Tente la synthèse avec Perplexity, bascule sur Gemini en cas d'échec"""
+    if CONFIG.get('PERPLEXITY_API_KEY', '').strip():
+        try:
+            return synthesize_with_perplexity(emails)
+        except Exception as e:
+            print(f'⚠️  Perplexity a échoué: {e}')
+            print('🔄 Basculement sur Gemini...')
+    else:
+        print('ℹ️  PERPLEXITY_API_KEY non configurée, utilisation de Gemini directement.')
+
+    return synthesize_with_gemini(emails)
+
+
 # ==================== FONCTION NOTION ====================
 def create_notion_page(synthesis):
     """Crée une page Notion avec la synthèse"""
@@ -684,8 +784,8 @@ def main():
         
         # 1. Vérifier la configuration
         print('📋 Vérification de la configuration...')
-        if not CONFIG.get('PERPLEXITY_API_KEY'):
-            raise Exception('PERPLEXITY_API_KEY non configurée. Ajoutez-la à votre fichier .env')
+        if not CONFIG.get('PERPLEXITY_API_KEY') and not CONFIG.get('GEMINI_API_KEY'):
+            raise Exception('Aucune clé AI configurée. Ajoutez PERPLEXITY_API_KEY et/ou GEMINI_API_KEY à votre fichier .env')
         if not CONFIG.get('NOTION_TOKEN'):
             raise Exception('NOTION_TOKEN non configuré. Ajoutez-le à votre fichier .env')
         if not CONFIG.get('NOTION_PARENT_PAGE_ID'):
@@ -706,8 +806,8 @@ def main():
             print('ℹ️  Aucune newsletter à traiter aujourd\'hui')
             return
         
-        # 4. Synthèse avec Perplexity
-        synthesis = synthesize_with_perplexity(emails)
+        # 4. Synthèse avec Perplexity (fallback Gemini si indisponible)
+        synthesis = synthesize_with_fallback(emails)
         
         # 5. Sauvegarde de la synthèse
         synthesis_path = save_synthesis(synthesis)
