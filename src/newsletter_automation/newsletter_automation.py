@@ -39,7 +39,6 @@ BASE_DIR = Path(__file__).resolve().parent
 # Puis fallback sur config/config.py (pour dev local)
 
 PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_PARENT_PAGE_ID = os.environ.get('NOTION_PARENT_PAGE_ID')
 NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
@@ -72,7 +71,6 @@ if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATIO
     SCOPES = config_module.SCOPES
     
     PERPLEXITY_API_KEY = CONFIG.get('PERPLEXITY_API_KEY')
-    GEMINI_API_KEY = CONFIG.get('GEMINI_API_KEY')
     NOTION_TOKEN = CONFIG['NOTION_TOKEN']
     NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
     NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
@@ -118,7 +116,6 @@ EMAIL_SOURCES = load_email_sources()
 # Créer un objet CONFIG pour compatibilité avec le reste du code
 CONFIG = {
     'PERPLEXITY_API_KEY': PERPLEXITY_API_KEY,
-    'GEMINI_API_KEY': GEMINI_API_KEY,
     'NOTION_TOKEN': NOTION_TOKEN,
     'NOTION_PARENT_PAGE_ID': NOTION_PARENT_PAGE_ID,
     'NOTIFICATION_EMAIL': NOTIFICATION_EMAIL,
@@ -349,10 +346,16 @@ def mark_emails_as_read_and_label(service, email_ids, label_name='newletterinnot
     print(f'✅ Emails marqués comme lus, étiquetés "{label_name}" et retirés de la boite de réception')
 
 
-def send_notification(service, notion_url, synthesis_path, emails=None, notebooklm_url=None):
+def send_notification(service, notion_url, synthesis_path, emails=None, notebooklm_url=None, synthesis_source='perplexity'):
     """Envoie un email de notification"""
     print('📬 Envoi de la notification...')
-    
+
+    # Bandeau source de la synthèse
+    if synthesis_source == 'perplexity':
+        source_banner = '<p style="background:#eafaf1;border-left:4px solid #2ecc71;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Perplexity AI</strong></p>'
+    else:
+        source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Perplexity indisponible</strong> — Contenu brut agrégé joint en pièce jointe. Chargez-le dans <strong>NotebookLM</strong> pour en faire une synthèse.</p>'
+
     # Construire la liste des emails traités
     emails_list_html = ''
     if emails:
@@ -381,7 +384,9 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     <html>
     <body style="font-family: Arial, sans-serif;">
         <h2 style="color: #2ecc71;">✅ Votre synthèse quotidienne est prête !</h2>
-        
+
+        {source_banner}
+
         <p><strong>📝 Notion:</strong> <a href="{notion_url}">Voir la page Notion</a></p>
         <p><strong>📎 Fichier synthèse:</strong> Joint à cet email</p>
         
@@ -571,101 +576,44 @@ NEWSLETTERS À SYNTHÉTISER:
     raise Exception('Impossible de contacter Perplexity API après plusieurs tentatives')
 
 
-# ==================== FONCTION GEMINI (FALLBACK) ====================
-def synthesize_with_gemini(emails, max_retries=3):
-    """Génère une synthèse avec Google Gemini AI (fallback)"""
-    import time
-    print('🤖 Synthèse avec Gemini (fallback)...')
+# ==================== FONCTION FALLBACK RAW (pour NotebookLM) ====================
+def aggregate_raw_content(emails):
+    """Agrège le contenu brut des emails parsés pour traitement manuel dans NotebookLM"""
+    from datetime import date
+    print('📄 Agrégation du contenu brut pour NotebookLM...')
 
-    api_key = CONFIG.get('GEMINI_API_KEY', '').strip()
-    if not api_key:
-        raise Exception('ERREUR: GEMINI_API_KEY n\'est pas configurée.')
+    today = date.today().strftime('%d/%m/%Y')
+    header = f'# CONTENU BRUT DES NEWSLETTERS - {today}\n\n'
+    header += f'Nombre de newsletters: {len(emails)}\n\n'
+    header += '---\n\n'
 
-    emails_text = '\n\n'.join([
-        f"### {email['from']} - {email['subject']}\n\n{email['content']}\n\n---"
-        for email in emails
-    ])
+    sections = []
+    for i, email in enumerate(emails, 1):
+        section = f'## [{i}] {email["subject"]}\n'
+        section += f'**De:** {email["from"]}\n\n'
+        section += email['content'].strip()
+        section += '\n\n---'
+        sections.append(section)
 
-    prompt = f"""Tu es un assistant expert qui synthétise des newsletters tech en français de manière très structurée et détaillée.
-
-Crée une synthèse complète des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format:
-
-## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
-
-Pour chaque thème principal trouvé, crée une section avec:
-- **Titre du thème** (ex: IA et Machine Learning, Cloud et Infrastructure, etc.)
-- Une **introduction** courte présentant le sujet
-- Une liste de **points clés** (utilise • pour chaque point important)
-- Les **éléments à retenir** avec impact ou implications
-- Les **chiffres ou données** pertinents s'il y en a
-
-Structure générale demandée:
-1. **Section résumé exécutif** (ce qu'il faut retenir en 3-4 points clés)
-2. **Sections thématiques principales** (groupées par domaine/sujet)
-3. **Tendances émergentes** (si identifiées)
-4. **Impacts et implications** (ce que cela signifie pour vous)
-
-Sois très détaillé, utilise des sous-titres clairs, et rends le texte facile à scanner.
-Ajoute des emojis pertinents pour améliorer la lisibilité.
-
-NEWSLETTERS À SYNTHÉTISER:
-{emails_text}"""
-
-    for attempt in range(max_retries):
-        try:
-            url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}'
-            payload = {
-                'contents': [{'parts': [{'text': prompt}]}],
-                'generationConfig': {'maxOutputTokens': 4000, 'temperature': 0.2}
-            }
-
-            print(f'  Tentative {attempt + 1}/{max_retries}...')
-            response = requests.post(url, json=payload, timeout=60)
-            print(f'  Réponse API: HTTP {response.status_code}')
-
-            if response.status_code == 401:
-                raise Exception('ERREUR 401: Authentification échouée. Vérifiez votre GEMINI_API_KEY')
-            elif response.status_code == 429:
-                print('  Limite de débit Gemini atteinte, attente 65s...')
-                time.sleep(65)
-                continue
-            elif response.status_code != 200:
-                raise Exception(f'Erreur Gemini API: {response.status_code} - {response.text}')
-
-            data = response.json()
-            synthesis = data['candidates'][0]['content']['parts'][0]['text']
-            print('✅ Synthèse Gemini générée avec succès')
-            return synthesis
-
-        except requests.exceptions.Timeout:
-            print(f'  Timeout (tentative {attempt + 1}/{max_retries})')
-            if attempt < max_retries - 1:
-                time.sleep(5)
-                continue
-            raise Exception('Timeout: Gemini API n\'a pas répondu à temps')
-        except requests.exceptions.ConnectionError as e:
-            print(f'  Erreur de connexion: {e}')
-            if attempt < max_retries - 1:
-                time.sleep(5)
-                continue
-            raise
-
-    raise Exception('Impossible de contacter Gemini API après plusieurs tentatives')
+    raw_text = header + '\n\n'.join(sections)
+    print(f'✅ Contenu brut agrégé ({len(emails)} newsletters, {len(raw_text)} caractères)')
+    return raw_text
 
 
 # ==================== FONCTION SYNTHÈSE AVEC FALLBACK ====================
 def synthesize_with_fallback(emails):
-    """Tente la synthèse avec Perplexity, bascule sur Gemini en cas d'échec"""
+    """Tente la synthèse avec Perplexity, bascule sur contenu brut (NotebookLM) en cas d'échec.
+    Retourne un tuple (synthesis, source) où source vaut 'perplexity' ou 'raw'."""
     if CONFIG.get('PERPLEXITY_API_KEY', '').strip():
         try:
-            return synthesize_with_perplexity(emails)
+            return synthesize_with_perplexity(emails), 'perplexity'
         except Exception as e:
             print(f'⚠️  Perplexity a échoué: {e}')
-            print('🔄 Basculement sur Gemini...')
+            print('🔄 Basculement sur agrégation brute pour NotebookLM...')
     else:
-        print('ℹ️  PERPLEXITY_API_KEY non configurée, utilisation de Gemini directement.')
+        print('ℹ️  PERPLEXITY_API_KEY non configurée, agrégation brute pour NotebookLM.')
 
-    return synthesize_with_gemini(emails)
+    return aggregate_raw_content(emails), 'raw'
 
 
 # ==================== FONCTION NOTION ====================
@@ -784,8 +732,8 @@ def main():
         
         # 1. Vérifier la configuration
         print('📋 Vérification de la configuration...')
-        if not CONFIG.get('PERPLEXITY_API_KEY') and not CONFIG.get('GEMINI_API_KEY'):
-            raise Exception('Aucune clé AI configurée. Ajoutez PERPLEXITY_API_KEY et/ou GEMINI_API_KEY à votre fichier .env')
+        if not CONFIG.get('PERPLEXITY_API_KEY'):
+            print('ℹ️  PERPLEXITY_API_KEY non configurée — le contenu brut sera agrégé pour NotebookLM en cas d\'échec')
         if not CONFIG.get('NOTION_TOKEN'):
             raise Exception('NOTION_TOKEN non configuré. Ajoutez-le à votre fichier .env')
         if not CONFIG.get('NOTION_PARENT_PAGE_ID'):
@@ -806,24 +754,24 @@ def main():
             print('ℹ️  Aucune newsletter à traiter aujourd\'hui')
             return
         
-        # 4. Synthèse avec Perplexity (fallback Gemini si indisponible)
-        synthesis = synthesize_with_fallback(emails)
-        
+        # 4. Synthèse avec Perplexity (fallback contenu brut pour NotebookLM si indisponible)
+        synthesis, synthesis_source = synthesize_with_fallback(emails)
+
         # 5. Sauvegarde de la synthèse
         synthesis_path = save_synthesis(synthesis)
         print(f'💾 Synthèse sauvegardée: {synthesis_path}')
-        
+
         # 6. Création de la page Notion
         notion_url = create_notion_page(synthesis)
-        
+
         # 7. Marquer les emails comme lus et les étiqueter
         mark_emails_as_read_and_label(gmail_service, [e['id'] for e in emails])
-        
+
         # 8. Créer le podcast NotebookLM
         notebooklm_url = create_notebooklm_podcast(synthesis_path)
-        
+
         # 9. Envoyer la notification avec la liste des mails
-        send_notification(gmail_service, notion_url, synthesis_path, emails, notebooklm_url)
+        send_notification(gmail_service, notion_url, synthesis_path, emails, notebooklm_url, synthesis_source)
         
         print('\n🎉 Automatisation terminée avec succès !')
         print(f'📊 {len(emails)} newsletter(s) traitée(s)')
