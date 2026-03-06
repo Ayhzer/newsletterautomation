@@ -652,13 +652,18 @@ def create_notion_page(synthesis):
     ]
     
     for paragraph in paragraphs:
-        children.append({
-            'object': 'block',
-            'type': 'paragraph',
-            'paragraph': {
-                'rich_text': [{'type': 'text', 'text': {'content': paragraph}}]
-            }
-        })
+        # L'API Notion limite les blocs de texte à 2000 caractères (on coupe à 1900 pour les emojis)
+        if not paragraph:
+            continue
+        for i in range(0, len(paragraph), 1900):
+            chunk = paragraph[i:i + 1900]
+            children.append({
+                'object': 'block',
+                'type': 'paragraph',
+                'paragraph': {
+                    'rich_text': [{'type': 'text', 'text': {'content': chunk}}]
+                }
+            })
     
     # Créer la page
     page = notion.pages.create(
