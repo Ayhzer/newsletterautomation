@@ -276,8 +276,7 @@ def fetch_newsletters(service):
                 msg['payload']['body']['data']
             ).decode('utf-8')
         
-        # Limiter la longueur pour éviter les contenus trop longs
-        content = content[:5000] if len(content) > 5000 else content
+        # Pas de limite ici : la troncature pour Perplexity se fait dans synthesize_with_perplexity
         
         emails.append({
             'id': message['id'],
@@ -465,9 +464,9 @@ def synthesize_with_perplexity(emails, max_retries=3):
     if not api_key:
         raise Exception('ERREUR: PERPLEXITY_API_KEY n\'est pas configurée. Vérifiez votre fichier .env')
     
-    # Préparer le contenu
+    # Préparer le contenu (tronqué à 5000 chars/email pour ne pas surcharger le prompt)
     emails_text = '\n\n'.join([
-        f"### {email['from']} - {email['subject']}\n\n{email['content']}\n\n---"
+        f"### {email['from']} - {email['subject']}\n\n{email['content'][:5000]}\n\n---"
         for email in emails
     ])
     
