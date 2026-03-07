@@ -709,7 +709,7 @@ def create_notion_page(synthesis):
                 }
             })
     
-    # Créer la page
+    # Créer la page avec les 100 premiers blocs (limite API Notion)
     page = notion.pages.create(
         parent={'page_id': CONFIG['NOTION_PARENT_PAGE_ID']},
         properties={
@@ -719,9 +719,16 @@ def create_notion_page(synthesis):
                 ]
             }
         },
-        children=children
+        children=children[:100]
     )
-    
+
+    # Ajouter les blocs restants par tranches de 100
+    for i in range(100, len(children), 100):
+        notion.blocks.children.append(
+            block_id=page['id'],
+            children=children[i:i + 100]
+        )
+
     print('✅ Page Notion créée')
     return page['url']
 
