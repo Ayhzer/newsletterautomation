@@ -345,15 +345,17 @@ def mark_emails_as_read_and_label(service, email_ids, label_name='newletterinnot
     print(f'✅ Emails marqués comme lus, étiquetés "{label_name}" et retirés de la boite de réception')
 
 
-def send_notification(service, notion_url, synthesis_path, emails=None, notebooklm_url=None, synthesis_source='perplexity'):
+def send_notification(service, notion_url, synthesis_path, emails=None, notebooklm_url=None, synthesis_source='perplexity', synthesis_text=None):
     """Envoie un email de notification"""
     print('📬 Envoi de la notification...')
 
     # Bandeau source de la synthèse
     if synthesis_source == 'perplexity':
-        source_banner = '<p style="background:#eafaf1;border-left:4px solid #2ecc71;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Perplexity AI</strong></p>'
+        source_banner = '<p style="background:#eafaf1;border-left:4px solid #2ecc71;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Perplexity AI</strong> (modèle sonar)</p>'
+        subject_source = '🤖 Perplexity AI'
     else:
-        source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Perplexity indisponible</strong> — Contenu brut agrégé joint en pièce jointe. Chargez-le dans <strong>NotebookLM</strong> pour en faire une synthèse.</p>'
+        source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Perplexity indisponible — Contenu brut agrégé</strong> joint en pièce jointe. Chargez-le dans <strong>NotebookLM</strong> pour en faire une synthèse.</p>'
+        subject_source = '📄 Contenu brut (Perplexity indisponible)'
 
     # Construire la liste des emails traités
     emails_list_html = ''
@@ -379,6 +381,31 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         </ol>
         '''
     
+    # Préparer le bloc de synthèse inline si disponible
+    synthesis_html = ''
+    if synthesis_text and synthesis_source == 'perplexity':
+        import html as html_module
+        # Convertir le markdown basique en HTML lisible
+        escaped = html_module.escape(synthesis_text)
+        # Titres ## → <h3>, ### → <h4>
+        import re
+        escaped = re.sub(r'^### (.+)$', r'<h4>\1</h4>', escaped, flags=re.MULTILINE)
+        escaped = re.sub(r'^## (.+)$', r'<h3>\1</h3>', escaped, flags=re.MULTILINE)
+        escaped = re.sub(r'^# (.+)$', r'<h2>\1</h2>', escaped, flags=re.MULTILINE)
+        # Gras **texte**
+        escaped = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', escaped)
+        # Bullet points
+        escaped = re.sub(r'^• (.+)$', r'<li>\1</li>', escaped, flags=re.MULTILINE)
+        escaped = re.sub(r'^- (.+)$', r'<li>\1</li>', escaped, flags=re.MULTILINE)
+        # Sauts de ligne
+        escaped = escaped.replace('\n', '<br>')
+        synthesis_html = f'''
+        <hr style="margin: 20px 0;">
+        <h3>📋 Synthèse complète :</h3>
+        <div style="background:#f9f9f9;border:1px solid #e0e0e0;border-radius:6px;padding:20px;margin:10px 0;font-size:14px;line-height:1.7;">
+            {escaped}
+        </div>'''
+
     html_content = f"""
     <html>
     <body style="font-family: Arial, sans-serif;">
@@ -388,30 +415,23 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
 
         <p><strong>📝 Notion:</strong> <a href="{notion_url}">Voir la page Notion</a></p>
         <p><strong>📎 Fichier synthèse:</strong> Joint à cet email</p>
-        
+
         <hr style="margin: 20px 0;">
-        
+
         {emails_list_html}
-        
-        <h3>📋 Ressources disponibles :</h3>
+
+        {synthesis_html}
+
+        <hr style="margin: 20px 0;">
+
+        <h3>📋 Ressources :</h3>
         <ul>
             <li><a href="{notion_url}">📖 Lire la synthèse Notion</a> - Accès rapide et structuré</li>
             <li>📎 <strong>Fichier texte en pièce jointe</strong> - Prêt à copier-coller dans NotebookLM</li>
         </ul>
-        
+
         {notebooklm_section}
-        
-        <hr style="margin: 20px 0;">
-        
-        <h3>💡 Utilisation rapide :</h3>
-        <p>Pour convertir cette synthèse en podcast :</p>
-        <ol>
-            <li>Ouvrez <a href="https://notebooklm.google.com">NotebookLM</a></li>
-            <li>Créez un nouveau notebook</li>
-            <li><strong>Drag & drop le fichier joint</strong> ou copiez-collez son contenu</li>
-            <li>NotebookLM générera automatiquement un "Audio Overview"</li>
-        </ol>
-        
+
         <p style="color: #7f8c8d; margin-top: 30px;">
             <em>🤖 Généré automatiquement par votre assistant newsletter</em>
         </p>
@@ -423,7 +443,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     message = MIMEMultipart()
     message['from'] = 'me'
     message['to'] = CONFIG['NOTIFICATION_EMAIL']
-    message['subject'] = '✅ Votre synthèse newsletter est prête !'
+    message['subject'] = f'✅ Synthèse newsletter — {subject_source}'
     
     # Ajouter le contenu HTML
     message.attach(MIMEText(html_content, 'html'))
@@ -464,37 +484,42 @@ def synthesize_with_perplexity(emails, max_retries=3):
     if not api_key:
         raise Exception('ERREUR: PERPLEXITY_API_KEY n\'est pas configurée. Vérifiez votre fichier .env')
     
-    # Préparer le contenu (tronqué à 5000 chars/email pour ne pas surcharger le prompt)
+    # Préparer le contenu (tronqué à 8000 chars/email pour ne pas surcharger le prompt)
     emails_text = '\n\n'.join([
-        f"### {email['from']} - {email['subject']}\n\n{email['content'][:5000]}\n\n---"
+        f"### {email['from']} - {email['subject']}\n\n{email['content'][:8000]}\n\n---"
         for email in emails
     ])
-    
-    prompt = f"""Tu es un assistant expert qui synthétise des newsletters tech en français de manière très structurée et détaillée.
 
-Crée une synthèse complète des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format:
+    prompt = f"""Tu es un assistant expert qui synthétise des newsletters en français de manière très structurée et détaillée.
+Les newsletters peuvent couvrir des domaines variés : tech, cybersécurité, santé, healthcare, etc.
+Adapte le vocabulaire et les sections thématiques au contenu reçu.
+
+Crée une synthèse COMPLÈTE et NON TRONQUÉE des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format :
 
 ## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
 
-Pour chaque thème principal trouvé, crée une section avec:
-- **Titre du thème** (ex: IA et Machine Learning, Cloud et Infrastructure, etc.)
+**Source de la synthèse : Perplexity AI (modèle sonar)**
+
+Pour chaque thème principal trouvé, crée une section avec :
+- **Titre du thème** (ex: Cybersécurité Santé, Ransomware, IA Médicale, Réglementation, etc.)
 - Une **introduction** courte présentant le sujet
 - Une liste de **points clés** (utilise • pour chaque point important)
 - Les **éléments à retenir** avec impact ou implications
 - Les **chiffres ou données** pertinents s'il y en a
 
-Structure générale demandée:
-1. **Section résumé exécutif** (ce qu'il faut retenir en 3-4 points clés)
-2. **Sections thématiques principales** (groupées par domaine/sujet)
+Structure générale demandée :
+1. **Résumé exécutif** (3-5 points clés essentiels à retenir)
+2. **Sections thématiques principales** (groupées par domaine/sujet — traite TOUS les sujets, ne coupe pas)
 3. **Tendances émergentes** (si identifiées)
-4. **Impacts et implications** (ce que cela signifie pour vous)
+4. **Impacts et actions recommandées** (ce que cela signifie concrètement)
 
+IMPORTANT : Ne tronque pas la synthèse. Traite intégralement CHAQUE newsletter reçue.
 Sois très détaillé, utilise des sous-titres clairs, et rends le texte facile à scanner.
 Ajoute des emojis pertinents pour améliorer la lisibilité.
 
-NEWSLETTERS À SYNTHÉTISER:
+NEWSLETTERS À SYNTHÉTISER :
 {emails_text}"""
-    
+
     # Appel API Perplexity avec retry et gestion d'erreurs améliorée
     for attempt in range(max_retries):
         try:
@@ -503,20 +528,20 @@ NEWSLETTERS À SYNTHÉTISER:
                 'Content-Type': 'application/json',
                 'User-Agent': 'NewsletterAutomation/1.0'
             }
-            
+
             payload = {
                 'model': 'sonar',
                 'messages': [
                     {
                         'role': 'system',
-                        'content': 'Tu es un assistant qui synthétise des newsletters tech en français de manière détaillée et structurée.'
+                        'content': 'Tu es un assistant qui synthétise des newsletters (tech, cybersécurité, santé, etc.) en français de manière détaillée, structurée et COMPLÈTE sans jamais tronquer le contenu.'
                     },
                     {
                         'role': 'user',
                         'content': prompt
                     }
                 ],
-                'max_tokens': 4000,
+                'max_tokens': 8000,
                 'temperature': 0.2
             }
             
@@ -827,7 +852,7 @@ def main():
         notebooklm_url = create_notebooklm_podcast(synthesis_path)
 
         # 9. Envoyer la notification avec la liste des mails
-        send_notification(gmail_service, notion_url, synthesis_path, emails, notebooklm_url, synthesis_source)
+        send_notification(gmail_service, notion_url, synthesis_path, emails, notebooklm_url, synthesis_source, synthesis_text=synthesis)
         
         print('\n🎉 Automatisation terminée avec succès !')
         print(f'📊 {len(emails)} newsletter(s) traitée(s)')
