@@ -582,7 +582,7 @@ def send_gmail(service, to_email: str, subject: str, text_body: str, html_body: 
 # ==================== EMAIL NOTIFICATIONS ====================
 
 def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
-                             config: Dict) -> bool:
+                             config: Dict, page_id: str = None) -> bool:
     """Envoie un email de notification avec le résumé via Gmail API"""
     if not config.get('general', {}).get('notifications', {}).get('enabled', False):
         print('  Notifications email désactivées')
@@ -600,9 +600,15 @@ def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
 
         subject = f'Healthcare Watch - {page_title}'
 
+        notion_url = ''
+        if page_id:
+            clean_id = page_id.replace('-', '')
+            notion_url = f'https://notion.so/{clean_id}'
+
         text = f"""Bonjour,
 
 Le rapport "{page_title}" a été généré avec succès et ajouté à Notion.
+{f'Lien Notion : {notion_url}' if notion_url else ''}
 
 Synthèse:
 {synthesis}
@@ -612,9 +618,11 @@ Healthcare Watch - Newsletter automatisée
 """
 
         safe_synthesis = synthesis.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        notion_link_html = f'<p><a href="{notion_url}" style="font-size: 1.1em; font-weight: bold;">→ Ouvrir dans Notion</a></p>' if notion_url else ''
         html = f"""<html><body>
 <h2>Rapport généré avec succès</h2>
 <p>Le rapport <strong>{page_title}</strong> a été généré et ajouté à Notion.</p>
+{notion_link_html}
 <h3>Synthèse:</h3>
 <pre style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">{safe_synthesis}</pre>
 <hr>
@@ -720,7 +728,7 @@ def main():
                     raise Exception('Échec de la création de la page Notion')
 
                 # 3. Envoyer email de notification
-                send_notification_email(prompt_key, synthesis, page_title, config)
+                send_notification_email(prompt_key, synthesis, page_title, config, page_id)
 
                 # 4. Mettre à jour la date d'exécution
                 update_last_run(prompt_key, last_run_file)
