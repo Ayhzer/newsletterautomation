@@ -273,16 +273,14 @@ def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
     if not api_key:
         raise ValueError("GEMINI_API_KEY n'est pas configurée")
 
-    default_options = {'max_tokens': 2000, 'temperature': 0.3}
+    default_options = {'max_tokens': 8192, 'temperature': 0.3}
     if options:
         default_options.update(options)
 
-    system_instruction = 'Tu es un expert en domaine sanitaire fournissant des informations factuelles et à jour.'
-    full_prompt = f"{system_instruction}\n\n{prompt}"
-
     url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}'
     payload = {
-        'contents': [{'parts': [{'text': full_prompt}]}],
+        'systemInstruction': {'parts': [{'text': 'Tu es un expert en domaine sanitaire fournissant des informations factuelles et à jour.'}]},
+        'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
         'generationConfig': {
             'maxOutputTokens': default_options['max_tokens'],
             'temperature': default_options['temperature']
@@ -309,8 +307,12 @@ def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
                 raise ValueError(f'Erreur API Gemini: {response.status_code} - {response.text}')
 
             data = response.json()
-            synthesis = data['candidates'][0]['content']['parts'][0]['text']
-            print('  Réponse reçue de Gemini')
+            candidate = data['candidates'][0]
+            synthesis = candidate['content']['parts'][0]['text']
+            finish_reason = candidate.get('finishReason', 'UNKNOWN')
+            if finish_reason == 'MAX_TOKENS':
+                print('  AVERTISSEMENT: Gemini a atteint MAX_TOKENS — réponse peut être tronquée')
+            print(f'  Réponse reçue de Gemini (finishReason: {finish_reason})')
             return synthesis
 
         except requests.exceptions.Timeout:
