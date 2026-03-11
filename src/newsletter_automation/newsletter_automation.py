@@ -276,7 +276,8 @@ def fetch_newsletters(service):
                 msg['payload']['body']['data']
             ).decode('utf-8')
         
-        # Pas de limite ici : la troncature pour Perplexity se fait dans synthesize_with_perplexity
+        # Limiter la longueur pour éviter les contenus trop longs
+        content = content[:5000] if len(content) > 5000 else content
         
         emails.append({
             'id': message['id'],
@@ -484,9 +485,9 @@ def synthesize_with_perplexity(emails, max_retries=3):
     if not api_key:
         raise Exception('ERREUR: PERPLEXITY_API_KEY n\'est pas configurée. Vérifiez votre fichier .env')
     
-    # Préparer le contenu (tronqué à 8000 chars/email pour ne pas surcharger le prompt)
+    # Préparer le contenu (troncature déjà appliquée en amont dans fetch_newsletters)
     emails_text = '\n\n'.join([
-        f"### {email['from']} - {email['subject']}\n\n{email['content'][:8000]}\n\n---"
+        f"### {email['from']} - {email['subject']}\n\n{email['content']}\n\n---"
         for email in emails
     ])
 
@@ -601,52 +602,8 @@ NEWSLETTERS À SYNTHÉTISER :
 
 
 # ==================== FONCTION FALLBACK RAW (pour NotebookLM) ====================
-def clean_raw_text(text):
-    """Nettoie le texte brut d'un email sans IA :
-    - Corrige l'encodage (ftfy)
-    - Supprime les URLs de tracking et les liens parasites
-    - Supprime les lignes purement décoratives / boilerplate
-    - Déduplique les lignes vides excessives
-    """
-    import re
-    from ftfy import fix_text
-
-    # Corriger l'encodage cassé (mojibake, etc.)
-    text = fix_text(text)
-
-    # Supprimer les liens Markdown : [texte](url) → texte
-    text = re.sub(r'\[([^\]]+)\]\(https?://[^\)]*\)', r'\1', text)
-
-    # Supprimer les URLs entre parenthèses : texte (https://...) → texte
-    text = re.sub(r'\s*\(https?://[^\)]*\)', '', text)
-
-    # Supprimer les URLs nues restantes
-    text = re.sub(r'https?://\S+', '', text)
-
-    # Supprimer les parenthèses vides restantes
-    text = re.sub(r'\(\s*\)', '', text)
-
-    # Supprimer les lignes qui ne contiennent que des symboles décoratifs ou du bruit
-    boilerplate_patterns = re.compile(
-        r'^\s*('
-        r'unsubscribe|désabonner|se désabonner|manage preferences|'
-        r'view in browser|voir dans le navigateur|view online|'
-        r'privacy policy|politique de confidentialité|'
-        r'©|copyright|\*{3,}|_{3,}|-{3,}|={3,}'
-        r').*$',
-        re.IGNORECASE
-    )
-    lines = [l for l in text.splitlines() if not boilerplate_patterns.match(l)]
-
-    # Supprimer les lignes vides en début/fin de chaque bloc et dédupliquer
-    text = '\n'.join(lines)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-
-    return text.strip()
-
-
 def aggregate_raw_content(emails):
-    """Agrège et nettoie le contenu des emails pour traitement dans NotebookLM"""
+    """Agrège le contenu brut des emails parsés pour traitement manuel dans NotebookLM"""
     from datetime import date
     print('📄 Agrégation du contenu brut pour NotebookLM...')
 
@@ -657,15 +614,14 @@ def aggregate_raw_content(emails):
 
     sections = []
     for i, email in enumerate(emails, 1):
-        cleaned = clean_raw_text(email['content'])
         section = f'## [{i}] {email["subject"]}\n'
         section += f'**De:** {email["from"]}\n\n'
-        section += cleaned
+        section += email['content'].strip()
         section += '\n\n---'
         sections.append(section)
 
     raw_text = header + '\n\n'.join(sections)
-    print(f'✅ Contenu agrégé et nettoyé ({len(emails)} newsletters, {len(raw_text)} caractères)')
+    print(f'✅ Contenu brut agrégé ({len(emails)} newsletters, {len(raw_text)} caractères)')
     return raw_text
 
 
@@ -721,18 +677,13 @@ def create_notion_page(synthesis):
     ]
     
     for paragraph in paragraphs:
-        # L'API Notion limite les blocs de texte à 2000 caractères (on coupe à 1900 pour les emojis)
-        if not paragraph:
-            continue
-        for i in range(0, len(paragraph), 1900):
-            chunk = paragraph[i:i + 1900]
-            children.append({
-                'object': 'block',
-                'type': 'paragraph',
-                'paragraph': {
-                    'rich_text': [{'type': 'text', 'text': {'content': chunk}}]
-                }
-            })
+        children.append({
+            'object': 'block',
+            'type': 'paragraph',
+            'paragraph': {
+                'rich_text': [{'type': 'text', 'text': {'content': paragraph}}]
+            }
+        })
     
     # Créer la page avec les 100 premiers blocs (limite API Notion)
     page = notion.pages.create(
