@@ -601,6 +601,186 @@ NEWSLETTERS À SYNTHÉTISER :
     raise Exception('Impossible de contacter Perplexity API après plusieurs tentatives')
 
 
+# ==================== FONCTION GEMINI (fallback 1) ====================
+def synthesize_with_gemini(emails):
+    """Génère une synthèse avec Google Gemini (fallback si Perplexity indisponible)"""
+    import time
+    print('🤖 Synthèse avec Gemini...')
+
+    api_key = CONFIG.get('GEMINI_API_KEY', '').strip()
+    if not api_key:
+        raise Exception('GEMINI_API_KEY non configurée')
+
+    emails_text = '\n\n'.join([
+        f"### {email['from']} - {email['subject']}\n\n{email['content'][:8000]}\n\n---"
+        for email in emails
+    ])
+
+    prompt = f"""Tu es un assistant expert qui synthétise des newsletters en français de manière très structurée et détaillée.
+Les newsletters peuvent couvrir des domaines variés : tech, cybersécurité, santé, healthcare, etc.
+Adapte le vocabulaire et les sections thématiques au contenu reçu.
+
+Crée une synthèse COMPLÈTE et NON TRONQUÉE des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format :
+
+## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
+
+**Source de la synthèse : Google Gemini**
+
+Pour chaque thème principal trouvé, crée une section avec :
+- **Titre du thème** (ex: Cybersécurité Santé, Ransomware, IA Médicale, Réglementation, etc.)
+- Une **introduction** courte présentant le sujet
+- Une liste de **points clés** (utilise • pour chaque point important)
+- Les **éléments à retenir** avec impact ou implications
+- Les **chiffres ou données** pertinents s'il y en a
+
+Structure générale demandée :
+1. **Résumé exécutif** (3-5 points clés essentiels à retenir)
+2. **Sections thématiques principales** (groupées par domaine/sujet — traite TOUS les sujets, ne coupe pas)
+3. **Tendances émergentes** (si identifiées)
+4. **Impacts et actions recommandées** (ce que cela signifie concrètement)
+
+IMPORTANT : Ne tronque pas la synthèse. Traite intégralement CHAQUE newsletter reçue.
+Sois très détaillé, utilise des sous-titres clairs, et rends le texte facile à scanner.
+Ajoute des emojis pertinents pour améliorer la lisibilité.
+
+NEWSLETTERS À SYNTHÉTISER :
+{emails_text}"""
+
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}'
+    payload = {
+        'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+        'generationConfig': {
+            'maxOutputTokens': 8000,
+            'temperature': 0.2
+        }
+    }
+
+    for attempt in range(3):
+        try:
+            print(f'  Tentative {attempt + 1}/3...')
+            response = requests.post(url, json=payload, timeout=60)
+            print(f'  Réponse API: HTTP {response.status_code}')
+
+            if response.status_code == 429:
+                print('  Limite de débit atteinte, attente 30s...')
+                time.sleep(30)
+                continue
+            elif response.status_code != 200:
+                raise Exception(f'Erreur Gemini API: {response.status_code} - {response.text}')
+
+            data = response.json()
+            synthesis = data['candidates'][0]['content']['parts'][0]['text']
+            print('✅ Synthèse Gemini générée avec succès')
+            return synthesis
+
+        except requests.exceptions.Timeout:
+            print(f'  Timeout (tentative {attempt + 1}/3)')
+            if attempt < 2:
+                time.sleep(5)
+                continue
+            raise Exception('Timeout: Gemini API n\'a pas répondu à temps')
+        except requests.exceptions.ConnectionError as e:
+            if attempt < 2:
+                time.sleep(5)
+                continue
+            raise
+
+    raise Exception('Impossible de contacter Gemini API après plusieurs tentatives')
+
+
+# ==================== FONCTION GROQ (fallback 2) ====================
+def synthesize_with_groq(emails):
+    """Génère une synthèse avec Groq (fallback gratuit si Perplexity et Gemini indisponibles)"""
+    import time
+    print('🤖 Synthèse avec Groq...')
+
+    api_key = CONFIG.get('GROQ_API_KEY', '').strip()
+    if not api_key:
+        raise Exception('GROQ_API_KEY non configurée')
+
+    emails_text = '\n\n'.join([
+        f"### {email['from']} - {email['subject']}\n\n{email['content'][:6000]}\n\n---"
+        for email in emails
+    ])
+
+    prompt = f"""Tu es un assistant expert qui synthétise des newsletters en français de manière très structurée et détaillée.
+Les newsletters peuvent couvrir des domaines variés : tech, cybersécurité, santé, healthcare, etc.
+Adapte le vocabulaire et les sections thématiques au contenu reçu.
+
+Crée une synthèse COMPLÈTE et NON TRONQUÉE des newsletters reçues aujourd'hui en suivant STRICTEMENT ce format :
+
+## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
+
+**Source de la synthèse : Groq (llama-3.3-70b)**
+
+Pour chaque thème principal trouvé, crée une section avec :
+- **Titre du thème** (ex: Cybersécurité Santé, Ransomware, IA Médicale, Réglementation, etc.)
+- Une **introduction** courte présentant le sujet
+- Une liste de **points clés** (utilise • pour chaque point important)
+- Les **éléments à retenir** avec impact ou implications
+- Les **chiffres ou données** pertinents s'il y en a
+
+Structure générale demandée :
+1. **Résumé exécutif** (3-5 points clés essentiels à retenir)
+2. **Sections thématiques principales** (groupées par domaine/sujet — traite TOUS les sujets, ne coupe pas)
+3. **Tendances émergentes** (si identifiées)
+4. **Impacts et actions recommandées** (ce que cela signifie concrètement)
+
+NEWSLETTERS À SYNTHÉTISER :
+{emails_text}"""
+
+    for attempt in range(3):
+        try:
+            print(f'  Tentative {attempt + 1}/3...')
+            response = requests.post(
+                'https://api.groq.com/openai/v1/chat/completions',
+                headers={
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'llama-3.3-70b-versatile',
+                    'messages': [
+                        {
+                            'role': 'system',
+                            'content': 'Tu es un assistant qui synthétise des newsletters en français de manière détaillée, structurée et COMPLÈTE sans jamais tronquer le contenu.'
+                        },
+                        {'role': 'user', 'content': prompt}
+                    ],
+                    'max_tokens': 8000,
+                    'temperature': 0.2
+                },
+                timeout=60
+            )
+            print(f'  Réponse API: HTTP {response.status_code}')
+
+            if response.status_code == 429:
+                print('  Limite de débit atteinte, attente 30s...')
+                time.sleep(30)
+                continue
+            elif response.status_code != 200:
+                raise Exception(f'Erreur Groq API: {response.status_code} - {response.text}')
+
+            data = response.json()
+            synthesis = data['choices'][0]['message']['content']
+            print('✅ Synthèse Groq générée avec succès')
+            return synthesis
+
+        except requests.exceptions.Timeout:
+            print(f'  Timeout (tentative {attempt + 1}/3)')
+            if attempt < 2:
+                time.sleep(5)
+                continue
+            raise Exception('Timeout: Groq API n\'a pas répondu à temps')
+        except requests.exceptions.ConnectionError as e:
+            if attempt < 2:
+                time.sleep(5)
+                continue
+            raise
+
+    raise Exception('Impossible de contacter Groq API après plusieurs tentatives')
+
+
 # ==================== FONCTION FALLBACK RAW (pour NotebookLM) ====================
 def aggregate_raw_content(emails):
     """Agrège le contenu brut des emails parsés pour traitement manuel dans NotebookLM"""
@@ -627,16 +807,34 @@ def aggregate_raw_content(emails):
 
 # ==================== FONCTION SYNTHÈSE AVEC FALLBACK ====================
 def synthesize_with_fallback(emails):
-    """Tente la synthèse avec Perplexity, bascule sur contenu brut (NotebookLM) en cas d'échec.
-    Retourne un tuple (synthesis, source) où source vaut 'perplexity' ou 'raw'."""
+    """Cascade de synthèse : Perplexity → Gemini → Groq → contenu brut (NotebookLM).
+    Retourne un tuple (synthesis, source) où source vaut 'perplexity', 'gemini', 'groq' ou 'raw'."""
     if CONFIG.get('PERPLEXITY_API_KEY', '').strip():
         try:
             return synthesize_with_perplexity(emails), 'perplexity'
         except Exception as e:
             print(f'⚠️  Perplexity a échoué: {e}')
+            print('🔄 Basculement sur Gemini...')
+    else:
+        print('ℹ️  PERPLEXITY_API_KEY non configurée, tentative Gemini...')
+
+    if CONFIG.get('GEMINI_API_KEY', '').strip():
+        try:
+            return synthesize_with_gemini(emails), 'gemini'
+        except Exception as e:
+            print(f'⚠️  Gemini a échoué: {e}')
+            print('🔄 Basculement sur Groq...')
+    else:
+        print('ℹ️  GEMINI_API_KEY non configurée, tentative Groq...')
+
+    if CONFIG.get('GROQ_API_KEY', '').strip():
+        try:
+            return synthesize_with_groq(emails), 'groq'
+        except Exception as e:
+            print(f'⚠️  Groq a échoué: {e}')
             print('🔄 Basculement sur agrégation brute pour NotebookLM...')
     else:
-        print('ℹ️  PERPLEXITY_API_KEY non configurée, agrégation brute pour NotebookLM.')
+        print('ℹ️  GROQ_API_KEY non configurée, agrégation brute pour NotebookLM.')
 
     return aggregate_raw_content(emails), 'raw'
 

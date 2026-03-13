@@ -11,14 +11,21 @@ SCOPES = [
 
 # ==================== CONFIGURATION ====================
 CONFIG = {
-    # Perplexity AI API
-    "PERPLEXITY_API_KEY": "pplx-xxxxxxxxxxxxxxxxxxxxx",  # À remplir
-    
-    # Notion API
+    # === Synthèse AI (cascade automatique : Perplexity → Gemini → Groq → brut) ===
+    # Tier 1 — Perplexity AI (recommandé)
+    "PERPLEXITY_API_KEY": "pplx-xxxxxxxxxxxxxxxxxxxxx",  # À remplir (optionnel)
+
+    # Tier 2 — Google Gemini (fallback si Perplexity indisponible)
+    "GEMINI_API_KEY": "AIzaxxxxxxxxxxxxxxxxxxxxx",  # À remplir (optionnel)
+
+    # Tier 3 — Groq (fallback si Gemini indisponible)
+    "GROQ_API_KEY": "gsk_xxxxxxxxxxxxxxxxxxxxx",  # À remplir (optionnel)
+
+    # === Notion API ===
     "NOTION_TOKEN": "ntn_xxxxxxxxxxxxxxxxxxxxx",  # À remplir
     "NOTION_PARENT_PAGE_ID": "xxxxxxxxxxxxxxxxxxxxx",  # À remplir
-    
-    # Email de notification
+
+    # === Email de notification ===
     "NOTIFICATION_EMAIL": "votre.email@example.com",  # À remplir
 }
 
