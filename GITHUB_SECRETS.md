@@ -15,6 +15,8 @@ Ce guide explique comment configurer tous les secrets nécessaires pour que votr
 
 ## 🔑 Secrets Requis
 
+> **Cascade IA automatique :** Le script tente les moteurs dans l'ordre Perplexity → Gemini → Groq. Configurez au moins l'un d'eux. En l'absence de tous, le contenu brut est produit pour NotebookLM.
+
 ### 1. PERPLEXITY_API_KEY
 
 **Syntaxe:** `pplx-xxxxxxxxxxxxxxxxxxxxxxxx`
@@ -39,7 +41,43 @@ Secret value: pplx-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p
 
 ---
 
-### 2. NOTION_TOKEN
+### 2. GEMINI_API_KEY *(Tier 2 — optionnel)*
+
+**Syntaxe:** `AIzaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+
+**Où l'obtenir:**
+1. Allez sur [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+2. Créez ou connectez-vous à votre compte Google
+3. Cliquez sur **Create API key**
+4. Copiez la clé commençant par `AIza`
+
+**À saisir dans GitHub:**
+```
+Secret name: GEMINI_API_KEY
+Secret value: AIzaxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+---
+
+### 3. GROQ_API_KEY *(Tier 3 — optionnel)*
+
+**Syntaxe:** `gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+
+**Où l'obtenir:**
+1. Allez sur [https://console.groq.com/keys](https://console.groq.com/keys)
+2. Créez ou connectez-vous à votre compte
+3. Cliquez sur **Create API Key**
+4. Copiez la clé commençant par `gsk_`
+
+**À saisir dans GitHub:**
+```
+Secret name: GROQ_API_KEY
+Secret value: gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+---
+
+### 4. NOTION_TOKEN
 
 **Syntaxe:** `ntn_xxxxxxxxxxxxxxxxxxxxx`
 
@@ -65,7 +103,7 @@ Secret value: ntn_12345678901234567890123456789012345678
 
 ---
 
-### 3. NOTION_PARENT_PAGE_ID
+### 5. NOTION_PARENT_PAGE_ID
 
 **Syntaxe:** `xxxxxxxxxxxxxxxxxxxxxxxx` (32 caractères hexadécimaux)
 
@@ -95,7 +133,7 @@ Secret value: 5f4c8b9a2d1e3f7c9b4a6d8e1f3c5b7a
 
 ---
 
-### 4. NOTIFICATION_EMAIL
+### 6. NOTIFICATION_EMAIL
 
 **Syntaxe:** `votre.email@gmail.com`
 
@@ -216,7 +254,7 @@ Secret value: (coller le JSON complet du fichier credentials.json)
 
 Avant de lancer le workflow:
 
-- [ ] **PERPLEXITY_API_KEY** - Saisi et commence par `pplx-`
+- [ ] Au moins une clé IA : **PERPLEXITY_API_KEY** (`pplx-...`) et/ou **GEMINI_API_KEY** (`AIza...`) et/ou **GROQ_API_KEY** (`gsk_...`)
 - [ ] **NOTION_TOKEN** - Saisi et commence par `ntn_`
 - [ ] **NOTION_PARENT_PAGE_ID** - Saisi (32 caractères)
 - [ ] **NOTIFICATION_EMAIL** - Saisi (format email valide)
@@ -252,10 +290,13 @@ Vérifiez les logs pour voir si tout fonctionne correctement.
 
 ## ❓ Dépannage
 
+### Aucune synthèse IA générée (contenu brut uniquement)
+- Vérifiez qu'au moins une clé IA est configurée : `PERPLEXITY_API_KEY`, `GEMINI_API_KEY` ou `GROQ_API_KEY`
+- Le script tente les trois en cascade et produit du brut uniquement si toutes échouent ou sont absentes
+
 ### Le workflow échoue avec "PERPLEXITY_API_KEY not configured"
-- Vérifiez que le secret `PERPLEXITY_API_KEY` est bien créé
-- Vérifiez qu'il commence par `pplx-`
-- Vérifiez qu'il n'y a pas d'espaces au début ou à la fin
+- Si vous utilisez Perplexity, vérifiez que le secret commence par `pplx-` et ne contient pas d'espaces
+- Sinon, configurez `GEMINI_API_KEY` ou `GROQ_API_KEY` comme alternative
 
 ### Erreur Gmail / Authentification
 - Si vous utilisez `GOOGLE_OAUTH_TOKEN_JSON`, assurez-vous qu'il contient un `refresh_token`

@@ -1,11 +1,11 @@
 # Newsletter Automation
 
-Script Python qui automatise la récupération de newsletters Gmail, génère des synthèses via Perplexity AI et crée des pages Notion.
+Script Python qui automatise la récupération de newsletters Gmail, génère des synthèses via IA et crée des pages Notion — avec cascade automatique de 3 moteurs IA.
 
 ## 🎯 Fonctionnalités
 
 - ✅ **Récupération automatique** des emails depuis Gmail
-- ✅ **Synthèses intelligentes** via l'API Perplexity (structurées et détaillées)
+- ✅ **Synthèses intelligentes** — cascade automatique : Perplexity → Gemini → Groq → brut
 - ✅ **Création de pages Notion** automatiquement
 - ✅ **Pièce jointe au mail** - Synthèse prête pour NotebookLM
 - ✅ **Sauvegarde locale** des synthèses en `.txt`
@@ -71,10 +71,14 @@ cp config/config.example.py config/config.py
 ```
 
 Remplir dans `config/config.py`:
-- `PERPLEXITY_API_KEY` - Clé API Perplexity
+- `PERPLEXITY_API_KEY` - Clé API Perplexity (Tier 1, optionnel)
+- `GEMINI_API_KEY` - Clé API Google Gemini (Tier 2, optionnel)
+- `GROQ_API_KEY` - Clé API Groq (Tier 3, optionnel)
 - `NOTION_TOKEN` - Token Notion
 - `NOTION_PARENT_PAGE_ID` - ID page Notion
 - `NOTIFICATION_EMAIL` - Email pour les notifications
+
+> Au moins une clé IA (Perplexity, Gemini ou Groq) est recommandée. En l'absence de toutes, le script produit le contenu brut pour NotebookLM.
 
 **2. Fichier email_sources.txt:**
 ```bash
@@ -125,7 +129,7 @@ Le workflow s'exécute automatiquement selon le planning configuré. Voir [GITHU
 ## 📊 Flux de travail
 
 1. 📧 **Récupère** les 2 derniers emails de chaque source
-2. 🤖 **Synthétise** avec Perplexity en sections structurées
+2. 🤖 **Synthétise** via cascade IA : Perplexity → Gemini → Groq → brut (NotebookLM)
 3. 💾 **Sauvegarde** le fichier `.txt`
 4. 📝 **Crée** une page Notion
 5. 🏷️ **Marque** les emails:
@@ -171,13 +175,15 @@ Seuls les fichiers `.example` sont committes.
 
 ## 💡 Améliorations récentes
 
+- ✅ **Cascade IA Tier 1→2→3** - Perplexity → Gemini → Groq → brut (NotebookLM)
+- ✅ **Fallback Gemini** - Google Gemini comme 2e moteur de synthèse
+- ✅ **Fallback Groq** - Groq (Llama) comme 3e moteur de synthèse
+- ✅ **Diff inter-runs** - Détecte les nouveaux emails ciblés entre deux exécutions
+- ✅ **Lien Notion dans l'email** - Accès direct à la page créée
 - ✅ **Pièce jointe automatique** - Synthèse jointe au mail
 - ✅ **Configuration simplifiée** - Email sources en fichier `.txt`
-- ✅ **Synthèses structurées** - Sections, listes à puces, données
 - ✅ **2 emails par source** - Meilleure couverture
-- ✅ **Nettoyage auto** - Retrait INBOX/NOTIFICATIONS
 - ✅ **GitHub Actions** - Automatisation complète
-- ✅ **Documentation complète** - Guides détaillés
 
 ## 🤝 Contribution
 
