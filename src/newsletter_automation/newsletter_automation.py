@@ -39,6 +39,8 @@ BASE_DIR = Path(__file__).resolve().parent
 # Puis fallback sur config/config.py (pour dev local)
 
 PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_PARENT_PAGE_ID = os.environ.get('NOTION_PARENT_PAGE_ID')
 NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
@@ -71,6 +73,8 @@ if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATIO
     SCOPES = config_module.SCOPES
     
     PERPLEXITY_API_KEY = CONFIG.get('PERPLEXITY_API_KEY')
+    GEMINI_API_KEY = GEMINI_API_KEY or CONFIG.get('GEMINI_API_KEY', '')
+    GROQ_API_KEY = GROQ_API_KEY or CONFIG.get('GROQ_API_KEY', '')
     NOTION_TOKEN = CONFIG['NOTION_TOKEN']
     NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
     NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
@@ -116,6 +120,8 @@ EMAIL_SOURCES = load_email_sources()
 # Créer un objet CONFIG pour compatibilité avec le reste du code
 CONFIG = {
     'PERPLEXITY_API_KEY': PERPLEXITY_API_KEY,
+    'GEMINI_API_KEY': GEMINI_API_KEY,
+    'GROQ_API_KEY': GROQ_API_KEY,
     'NOTION_TOKEN': NOTION_TOKEN,
     'NOTION_PARENT_PAGE_ID': NOTION_PARENT_PAGE_ID,
     'NOTIFICATION_EMAIL': NOTIFICATION_EMAIL,
@@ -354,9 +360,15 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     if synthesis_source == 'perplexity':
         source_banner = '<p style="background:#eafaf1;border-left:4px solid #2ecc71;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Perplexity AI</strong> (modèle sonar)</p>'
         subject_source = '🤖 Perplexity AI'
+    elif synthesis_source == 'gemini':
+        source_banner = '<p style="background:#e8f4fd;border-left:4px solid #3498db;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Google Gemini</strong> (modèle gemini-2.5-flash) — Perplexity indisponible</p>'
+        subject_source = '🤖 Gemini (fallback)'
+    elif synthesis_source == 'groq':
+        source_banner = '<p style="background:#f0ebff;border-left:4px solid #8e44ad;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Groq</strong> (modèle llama-3.3-70b) — Perplexity et Gemini indisponibles</p>'
+        subject_source = '🤖 Groq (fallback)'
     else:
-        source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Perplexity indisponible — Contenu brut agrégé</strong> joint en pièce jointe. Chargez-le dans <strong>NotebookLM</strong> pour en faire une synthèse.</p>'
-        subject_source = '📄 Contenu brut (Perplexity indisponible)'
+        source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Tous les services AI indisponibles — Contenu brut agrégé</strong> joint en pièce jointe. Chargez-le dans <strong>NotebookLM</strong> pour en faire une synthèse.</p>'
+        subject_source = '📄 Contenu brut (AI indisponible)'
 
     # Construire la liste des emails traités
     emails_list_html = ''
@@ -384,7 +396,7 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     
     # Préparer le bloc de synthèse inline si disponible
     synthesis_html = ''
-    if synthesis_text and synthesis_source == 'perplexity':
+    if synthesis_text and synthesis_source in ('perplexity', 'gemini', 'groq'):
         import html as html_module
         # Convertir le markdown basique en HTML lisible
         escaped = html_module.escape(synthesis_text)
