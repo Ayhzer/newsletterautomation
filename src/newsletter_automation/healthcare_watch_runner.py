@@ -180,7 +180,7 @@ def update_last_run(prompt_key: str, last_run_file: Path, content: str = None):
     entry = {'last_run': datetime.now().isoformat()}
     if content:
         entry['content_hash'] = hashlib.sha256(content.encode('utf-8')).hexdigest()
-        entry['content_text'] = content[:3000]
+        entry['content_text'] = content[:5000]
 
     # Conserver les champs existants non écrasés (compatibilité ancien format)
     if isinstance(run_history.get(prompt_key), str):
@@ -214,22 +214,23 @@ def compute_diff_score(old_text: str, new_text: str) -> float:
 
 def extract_novelties(old_content: str, new_content: str, config: Dict) -> str:
     """Appelle le LLM pour extraire uniquement les nouveautés entre deux rapports"""
-    diff_prompt = f"""Voici deux rapports successifs sur le même sujet.
+    diff_prompt = f"""Voici deux rapports successifs sur le même sujet de veille sanitaire/réglementaire.
 
 === RAPPORT PRÉCÉDENT ===
-{old_content[:2000]}
+{old_content[:3500]}
 
 === RAPPORT ACTUEL ===
-{new_content[:2000]}
+{new_content[:3500]}
 
-Ta mission : identifie et liste UNIQUEMENT ce qui est nouveau, différent ou plus urgent dans le rapport actuel par rapport au précédent.
-- Ignore ce qui est répété ou reformulé à l'identique
-- Mets en avant les nouvelles alertes, nouvelles réglementations, nouveaux incidents
-- Sois concis et structuré (bullet points)
-- Si vraiment rien de nouveau, réponds juste : "Aucune nouveauté significative."
+Ta mission : identifie et liste UNIQUEMENT les VRAIES NOUVEAUTÉS du rapport actuel par rapport au précédent.
+- Ignore tout ce qui est reformulé ou répété avec d'autres mots
+- Mets en avant UNIQUEMENT : nouveaux incidents, nouvelles réglementations publiées, nouvelles alertes, dates ou délais nouveaux, changements de position d'autorités
+- Format : bullet points courts, 1 ligne par nouveauté, avec date si disponible
+- Si aucune nouveauté réelle : réponds uniquement "Aucune nouveauté significative."
+- Ne justifie pas ton analyse, liste juste les nouveautés
 """
     # Options légères pour le diff (réponse courte attendue)
-    diff_options = {'max_tokens': 1500, 'temperature': 0.2}
+    diff_options = {'max_tokens': 1500, 'temperature': 0.1}
     return query_with_fallback(diff_prompt, config, diff_options)
 
 
@@ -717,8 +718,8 @@ def send_gmail(service, to_email: str, subject: str, text_body: str, html_body: 
 # ==================== EMAIL NOTIFICATIONS ====================
 
 def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
-                             config: Dict, page_id: str = None,
-                             novelties: str = None, is_new: bool = True) -> bool:
+                             config: Dict, page_id: Optional[str] = None,
+                             novelties: Optional[str] = None, is_new: bool = True) -> bool:
     """Envoie un email de notification.
     - is_new=True + novelties : mail avec uniquement les nouveautés
     - is_new=False : mail sobre "rien de nouveau"
@@ -897,17 +898,25 @@ def main():
                     send_notification_email(prompt_key, synthesis, page_title, config, page_id,
                                             novelties=None, is_new=True)
                 else:
-                    similarity = compute_diff_score(old_content, synthesis[:3000])
+                    similarity = compute_diff_score(old_content, synthesis[:5000])
                     print(f'  Similarité avec run précédent: {similarity:.0%}')
-                    if similarity >= 0.85:
-                        print('  Contenu quasi-identique, mail sobre "rien de nouveau"')
+                    # Seuil bas pour forcer l'analyse LLM dès qu'il y a le moindre écart
+                    # Le LLM tranchera lui-même si les différences sont significatives
+                    if similarity >= 0.92:
+                        print('  Contenu quasi-identique (>92%), mail sobre "rien de nouveau"')
                         send_notification_email(prompt_key, synthesis, page_title, config, page_id,
                                                 novelties=None, is_new=False)
                     else:
-                        print('  Changements détectés, extraction des nouveautés...')
+                        print(f'  Changements détectés ({similarity:.0%} similarité), extraction des nouveautés...')
                         novelties = extract_novelties(old_content, synthesis, config)
-                        send_notification_email(prompt_key, synthesis, page_title, config, page_id,
-                                                novelties=novelties, is_new=True)
+                        # Si le LLM répond "Aucune nouveauté significative", envoyer mail sobre
+                        if novelties.strip().lower().startswith('aucune nouveauté'):
+                            print('  LLM confirme : aucune nouveauté significative')
+                            send_notification_email(prompt_key, synthesis, page_title, config, page_id,
+                                                    novelties=None, is_new=False)
+                        else:
+                            send_notification_email(prompt_key, synthesis, page_title, config, page_id,
+                                                    novelties=novelties, is_new=True)
 
                 # 4. Mettre à jour la date d'exécution et le contenu pour le prochain diff
                 update_last_run(prompt_key, last_run_file, content=synthesis)
