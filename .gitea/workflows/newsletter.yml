@@ -20,6 +20,8 @@ jobs:
 
     steps:
       - name: Checkout repository
+        env:
+          GIT_SSL_NO_VERIFY: "true"
         run: git clone https://oauth2:${{ secrets.GITEA_TOKEN }}@papageek.hopto.org:8443/ayhzer/newsletterautomation.git .
 
       - name: Set up Python
@@ -59,6 +61,8 @@ jobs:
 
     steps:
       - name: Checkout repository
+        env:
+          GIT_SSL_NO_VERIFY: "true"
         run: git clone https://oauth2:${{ secrets.GITEA_TOKEN }}@papageek.hopto.org:8443/ayhzer/newsletterautomation.git .
 
       - name: Set up Python
@@ -88,6 +92,8 @@ jobs:
 
       - name: Commit execution log
         if: always()
+        env:
+          GIT_SSL_NO_VERIFY: "true"
         run: |
           git config --global user.email "action@gitea.local"
           git config --global user.name "Gitea Action"
