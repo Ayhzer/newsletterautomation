@@ -17,17 +17,14 @@ on:
 jobs:
   run-newsletter:
     runs-on: ubuntu-latest
+    container:
+      image: python:3.11-bookworm
 
     steps:
       - name: Checkout repository
         env:
           GIT_SSL_NO_VERIFY: "true"
         run: git clone https://oauth2:${{ secrets.GITEA_TOKEN }}@papageek.hopto.org:8443/ayhzer/newsletterautomation.git .
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -55,6 +52,8 @@ jobs:
 
   run-healthcare-watch:
     runs-on: ubuntu-latest
+    container:
+      image: python:3.11-bookworm
     needs: run-newsletter
     if: always()
     timeout-minutes: 30
@@ -64,12 +63,6 @@ jobs:
         env:
           GIT_SSL_NO_VERIFY: "true"
         run: git clone https://oauth2:${{ secrets.GITEA_TOKEN }}@papageek.hopto.org:8443/ayhzer/newsletterautomation.git .
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: 'pip'
 
       - name: Install dependencies
         run: |
