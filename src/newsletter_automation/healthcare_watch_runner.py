@@ -15,7 +15,6 @@ import json
 import yaml
 import base64
 import hashlib
-import difflib
 import importlib.util
 from pathlib import Path
 from datetime import datetime
@@ -74,7 +73,6 @@ def load_config() -> Dict:
     # Charger les secrets depuis les variables d'environnement
     perplexity_key = os.environ.get('PERPLEXITY_API_KEY', '')
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
-    groq_key = os.environ.get('GROQ_API_KEY', '')
     notion_token = os.environ.get('NOTION_TOKEN', '')
     notion_parent_page_id = os.environ.get('NOTION_PARENT_PAGE_ID', '')
     notification_email = os.environ.get('NOTIFICATION_EMAIL', '')
@@ -90,7 +88,6 @@ def load_config() -> Dict:
             cfg = config_module.CONFIG
             perplexity_key = perplexity_key or cfg.get('PERPLEXITY_API_KEY', '')
             gemini_key = gemini_key or cfg.get('GEMINI_API_KEY', '')
-            groq_key = groq_key or cfg.get('GROQ_API_KEY', '')
             notion_token = notion_token or cfg.get('NOTION_TOKEN', '')
             notion_parent_page_id = notion_parent_page_id or cfg.get('NOTION_PARENT_PAGE_ID', '')
             notification_email = notification_email or cfg.get('NOTIFICATION_EMAIL', '')
@@ -98,7 +95,6 @@ def load_config() -> Dict:
     config['secrets'] = {
         'PERPLEXITY_API_KEY': perplexity_key,
         'GEMINI_API_KEY': gemini_key,
-        'GROQ_API_KEY': groq_key,
         'NOTION_TOKEN': notion_token,
         'NOTION_PARENT_PAGE_ID': notion_parent_page_id,
         'NOTIFICATION_EMAIL': notification_email,
@@ -106,8 +102,8 @@ def load_config() -> Dict:
     }
 
     # Valider les secrets requis : au moins une clé AI + Notion
-    if not perplexity_key and not gemini_key and not groq_key:
-        raise ValueError("Secrets manquants: PERPLEXITY_API_KEY, GEMINI_API_KEY ou GROQ_API_KEY requis")
+    if not perplexity_key and not gemini_key:
+        raise ValueError("Secrets manquants: PERPLEXITY_API_KEY et/ou GEMINI_API_KEY requis")
     if not notion_token:
         raise ValueError("Secrets manquants: NOTION_TOKEN")
 
@@ -171,67 +167,33 @@ def should_run_prompt(prompt_key: str, prompt_config: Dict, last_run_file: Path)
 
 
 def update_last_run(prompt_key: str, last_run_file: Path, content: str = None):
-    """Met à jour la date de dernière exécution et optionnellement le contenu pour le diff"""
+    """Met à jour la date de dernière exécution d'un prompt, et optionnellement le hash/extrait du contenu."""
     run_history = {}
     if last_run_file.exists():
         with open(last_run_file, 'r') as f:
             run_history = json.load(f)
 
-    entry = {'last_run': datetime.now().isoformat()}
-    if content:
-        entry['content_hash'] = hashlib.sha256(content.encode('utf-8')).hexdigest()
-        entry['content_text'] = content[:5000]
+    run_history[prompt_key] = datetime.now().isoformat()
 
-    # Conserver les champs existants non écrasés (compatibilité ancien format)
-    if isinstance(run_history.get(prompt_key), str):
-        run_history[prompt_key] = entry
-    else:
-        existing = run_history.get(prompt_key, {})
-        existing.update(entry)
-        run_history[prompt_key] = existing
+    if content is not None:
+        run_history[f'{prompt_key}__hash'] = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        run_history[f'{prompt_key}__snippet'] = content[:1000]
 
     last_run_file.parent.mkdir(parents=True, exist_ok=True)
     with open(last_run_file, 'w') as f:
         json.dump(run_history, f, indent=2)
 
 
-def get_last_content(prompt_key: str, last_run_file: Path) -> Optional[str]:
-    """Retourne le contenu du dernier run pour ce prompt, ou None si premier run"""
+def get_previous_content(prompt_key: str, last_run_file: Path) -> Tuple[Optional[str], Optional[str]]:
+    """Retourne (hash_précédent, snippet_précédent) ou (None, None) si absent."""
     if not last_run_file.exists():
-        return None
+        return None, None
     with open(last_run_file, 'r') as f:
         run_history = json.load(f)
-    entry = run_history.get(prompt_key, {})
-    if isinstance(entry, str):
-        return None  # ancien format sans contenu
-    return entry.get('content_text')
-
-
-def compute_diff_score(old_text: str, new_text: str) -> float:
-    """Retourne un ratio de similarité 0.0 (tout différent) à 1.0 (identique)"""
-    return difflib.SequenceMatcher(None, old_text, new_text).ratio()
-
-
-def extract_novelties(old_content: str, new_content: str, config: Dict) -> str:
-    """Appelle le LLM pour extraire uniquement les nouveautés entre deux rapports"""
-    diff_prompt = f"""Voici deux rapports successifs sur le même sujet de veille sanitaire/réglementaire.
-
-=== RAPPORT PRÉCÉDENT ===
-{old_content[:3500]}
-
-=== RAPPORT ACTUEL ===
-{new_content[:3500]}
-
-Ta mission : identifie et liste UNIQUEMENT les VRAIES NOUVEAUTÉS du rapport actuel par rapport au précédent.
-- Ignore tout ce qui est reformulé ou répété avec d'autres mots
-- Mets en avant UNIQUEMENT : nouveaux incidents, nouvelles réglementations publiées, nouvelles alertes, dates ou délais nouveaux, changements de position d'autorités
-- Format : bullet points courts, 1 ligne par nouveauté, avec date si disponible
-- Si aucune nouveauté réelle : réponds uniquement "Aucune nouveauté significative."
-- Ne justifie pas ton analyse, liste juste les nouveautés
-"""
-    # Options légères pour le diff (réponse courte attendue)
-    diff_options = {'max_tokens': 1500, 'temperature': 0.1}
-    return query_with_fallback(diff_prompt, config, diff_options)
+    return (
+        run_history.get(f'{prompt_key}__hash'),
+        run_history.get(f'{prompt_key}__snippet')
+    )
 
 
 # ==================== PERPLEXITY API ====================
@@ -384,85 +346,11 @@ def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
     raise Exception('Impossible de contacter Gemini API après 3 tentatives')
 
 
-def query_groq(prompt: str, config: Dict, options: Dict = None) -> str:
-    """Interroge l'API Groq avec le prompt fourni (fallback Tier 3, gratuit)"""
-    api_key = config['secrets'].get('GROQ_API_KEY', '').strip()
-
-    if not api_key:
-        raise ValueError("GROQ_API_KEY n'est pas configurée")
-
-    default_options = {'max_tokens': 8192, 'temperature': 0.3}
-    if options:
-        merged = dict(default_options)
-        merged.update(options)
-        default_options = merged
-
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json',
-    }
-    payload = {
-        'model': 'llama-3.3-70b-versatile',
-        'messages': [
-            {'role': 'system', 'content': 'Tu es un expert en domaine sanitaire fournissant des informations factuelles et à jour.'},
-            {'role': 'user', 'content': prompt}
-        ],
-        'max_tokens': default_options['max_tokens'],
-        'temperature': default_options['temperature']
-    }
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            print(f'  Appel Groq (tentative {attempt + 1}/{max_retries})...')
-            response = requests.post(
-                'https://api.groq.com/openai/v1/chat/completions',
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-
-            if response.status_code == 401:
-                raise ValueError('Authentification Groq échouée (401). Vérifiez GROQ_API_KEY')
-            elif response.status_code == 429:
-                print('  Limite de débit Groq atteinte, attente 30s...')
-                time.sleep(30)
-                continue
-            elif response.status_code >= 500:
-                print('  Erreur serveur Groq, nouvelle tentative...')
-                time.sleep(5)
-                continue
-            elif response.status_code != 200:
-                raise ValueError(f'Erreur API Groq: {response.status_code} - {response.text}')
-
-            data = response.json()
-            if 'choices' not in data or not data['choices']:
-                raise ValueError('Format de réponse Groq invalide')
-
-            synthesis = data['choices'][0]['message']['content']
-            print('  Réponse reçue de Groq')
-            return synthesis
-
-        except requests.exceptions.Timeout:
-            if attempt < max_retries - 1:
-                time.sleep(5)
-                continue
-            raise TimeoutError('Timeout Groq API')
-        except requests.exceptions.RequestException as e:
-            if attempt < max_retries - 1:
-                time.sleep(5)
-                continue
-            raise
-
-    raise Exception('Impossible de contacter Groq API après 3 tentatives')
-
-
 def query_with_fallback(prompt: str, config: Dict, options: Dict = None) -> str:
-    """Tente Perplexity → Gemini → Groq en cascade"""
+    """Tente Perplexity, bascule sur Gemini en cas d'échec"""
     perplexity_key = config['secrets'].get('PERPLEXITY_API_KEY', '').strip()
     gemini_key = config['secrets'].get('GEMINI_API_KEY', '').strip()
-    groq_key = config['secrets'].get('GROQ_API_KEY', '').strip()
-    print(f'  [fallback] perplexity: {bool(perplexity_key)}, gemini: {bool(gemini_key)}, groq: {bool(groq_key)}')
+    print(f'  [fallback] perplexity_key présente: {bool(perplexity_key)}, gemini_key présente: {bool(gemini_key)}')
 
     if perplexity_key:
         try:
@@ -470,17 +358,51 @@ def query_with_fallback(prompt: str, config: Dict, options: Dict = None) -> str:
         except Exception as e:
             print(f'  Perplexity a échoué ({type(e).__name__}): {e}')
             print('  Basculement sur Gemini...')
-
-    if gemini_key:
-        try:
-            return query_gemini(prompt, config, options)
-        except Exception as e:
-            print(f'  Gemini a échoué ({type(e).__name__}): {e}')
-            print('  Basculement sur Groq...')
     else:
-        print('  GEMINI_API_KEY non configurée, passage à Groq.')
+        print('  PERPLEXITY_API_KEY non configurée, utilisation de Gemini directement.')
 
-    return query_groq(prompt, config, options)
+    return query_gemini(prompt, config, options)
+
+
+# ==================== DELTA / NOUVEAUTÉS ====================
+
+def extract_novelties(previous_snippet: str, new_content: str, config: Dict) -> Optional[str]:
+    """Demande à Gemini d'extraire uniquement les éléments nouveaux par rapport au rapport précédent.
+    Retourne None si aucune nouveauté significative détectée."""
+    gemini_key = config['secrets'].get('GEMINI_API_KEY', '').strip()
+    if not gemini_key:
+        # Pas de Gemini : on renvoie le contenu complet
+        return new_content
+
+    prompt = f"""Tu es un assistant qui compare deux rapports de veille sanitaire.
+
+RAPPORT PRÉCÉDENT (extrait):
+{previous_snippet}
+
+NOUVEAU RAPPORT:
+{new_content}
+
+Ta tâche :
+1. Identifie UNIQUEMENT les éléments réellement nouveaux dans le nouveau rapport (nouvelles alertes, nouveaux incidents, nouvelles réglementations, nouveaux chiffres).
+2. Ignore tout ce qui était déjà présent dans le rapport précédent.
+3. Si aucune nouveauté significative n'est détectée, réponds EXACTEMENT : "AUCUNE_NOUVEAUTÉ"
+4. Sinon, liste les nouveautés de façon concise en bullet points, sans répéter l'ancien contenu.
+
+Réponse (nouveautés uniquement ou AUCUNE_NOUVEAUTÉ) :"""
+
+    try:
+        result = query_gemini(prompt, config, {'max_tokens': 1000, 'temperature': 0.1})
+        result = result.strip()
+        if result == 'AUCUNE_NOUVEAUTÉ' or 'aucune nouveauté' in result.lower():
+            return None
+        return result
+    except Exception as e:
+        print(f'  Extraction nouveautés échouée ({e}), envoi du contenu complet')
+        return new_content
+
+
+def content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
 # ==================== NOTION API ====================
@@ -718,82 +640,58 @@ def send_gmail(service, to_email: str, subject: str, text_body: str, html_body: 
 # ==================== EMAIL NOTIFICATIONS ====================
 
 def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
-                             config: Dict, page_id: Optional[str] = None,
-                             novelties: Optional[str] = None, is_new: bool = True) -> bool:
-    """Envoie un email de notification.
-    - is_new=True + novelties : mail avec uniquement les nouveautés
-    - is_new=False : mail sobre "rien de nouveau"
+                             config: Dict, novelties: Optional[str] = None) -> bool:
+    """Envoie un email de notification via Gmail API.
+    Si novelties est fourni, n'envoie que les nouveautés. Si None, aucune nouveauté → skip.
+    Si novelties vaut synthesis (premier run ou Gemini absent), envoie le contenu complet.
     """
     if not config.get('general', {}).get('notifications', {}).get('enabled', False):
         print('  Notifications email désactivées')
         return True
-
-    print("  Envoi de l'email de notification (Gmail API)...")
 
     to_email = config['secrets']['NOTIFICATION_EMAIL']
     if not to_email:
         print('  NOTIFICATION_EMAIL non configuré, notification ignorée')
         return False
 
+    # novelties=None signifie "aucune nouveauté" → pas d'email
+    if novelties is None:
+        print('  Aucune nouveauté détectée, email ignoré')
+        return True
+
+    print("  Envoi de l'email de notification (Gmail API)...")
+
+    is_full = (novelties == synthesis)
+    section_label = 'Synthèse complète' if is_full else 'Nouveautés détectées'
+    subject = f'Healthcare Watch - {page_title}' if is_full else f'[Nouveautés] Healthcare Watch - {page_title}'
+
     try:
         service = get_gmail_service(config)
 
-        notion_url = ''
-        if page_id:
-            clean_id = page_id.replace('-', '')
-            notion_url = f'https://notion.so/{clean_id}'
+        text = f"""Bonjour,
 
-        notion_link_html = f'<p><a href="{notion_url}" style="font-size: 1.1em; font-weight: bold;">→ Ouvrir dans Notion</a></p>' if notion_url else ''
-        notion_link_text = f'Lien Notion : {notion_url}' if notion_url else ''
+Le rapport "{page_title}" a été généré et ajouté à Notion.
 
-        if not is_new:
-            # Cas "rien de nouveau"
-            subject = f'[=] Healthcare Watch - {page_title}'
-            text = f"""Bonjour,
-
-Aucune nouveauté significative depuis le dernier rapport "{page_title}".
-La page Notion a été mise à jour avec le rapport complet.
-{notion_link_text}
+{section_label}:
+{novelties}
 
 ---
 Healthcare Watch - Newsletter automatisée
 """
-            html = f"""<html><body>
-<h2 style="color: #888;">Aucune nouveauté significative</h2>
-<p>Le rapport <strong>{page_title}</strong> n'apporte pas de changements majeurs depuis la dernière exécution.</p>
-{notion_link_html}
-<hr>
-<p style="color: #888; font-size: 0.9em;"><em>Healthcare Watch - Newsletter automatisée</em></p>
-</body></html>"""
-        else:
-            # Cas "nouveautés détectées"
-            subject = f'[NEW] Healthcare Watch - {page_title}'
-            content_to_show = novelties if novelties else synthesis
-            safe_content = content_to_show.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            section_title = 'Nouveautés détectées' if novelties else 'Synthèse complète'
-            text = f"""Bonjour,
 
-Nouvelles informations détectées dans "{page_title}".
-{notion_link_text}
-
-{section_title}:
-{content_to_show}
-
----
-Healthcare Watch - Newsletter automatisée
-"""
-            html = f"""<html><body>
-<h2>Nouvelles informations détectées</h2>
-<p>Le rapport <strong>{page_title}</strong> contient des nouveautés depuis le dernier run.</p>
-{notion_link_html}
-<h3>{section_title} :</h3>
-<pre style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">{safe_content}</pre>
+        safe_novelties = novelties.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        header_color = '#2c3e50' if is_full else '#e67e22'
+        html = f"""<html><body>
+<h2 style="color: {header_color};">{section_label}</h2>
+<p>Le rapport <strong>{page_title}</strong> a été généré et ajouté à Notion.</p>
+<h3>{section_label} :</h3>
+<pre style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">{safe_novelties}</pre>
 <hr>
 <p style="color: #888; font-size: 0.9em;"><em>Healthcare Watch - Newsletter automatisée</em></p>
 </body></html>"""
 
         send_gmail(service, to_email, subject, text, html)
-        print(f'  Email envoyé via Gmail API ({"nouveautés" if is_new else "rien de nouveau"})')
+        print('  Email envoyé via Gmail API')
         return True
 
     except Exception as e:
@@ -873,12 +771,29 @@ def main():
                     print(f'  Fréquence {freq} non atteinte, skip')
                     continue
 
-                # 1. Interroger l'IA (Perplexity → Gemini → Groq)
+                # 1. Interroger l'IA (Perplexity avec fallback Gemini)
                 prompt_text = prompt_config.get('prompt', '')
                 options = prompt_config.get('options', {})
                 synthesis = query_with_fallback(prompt_text, config, options)
 
-                # 2. Créer la page Notion
+                # 2. Détecter les nouveautés vs rapport précédent
+                prev_hash, prev_snippet = get_previous_content(prompt_key, last_run_file)
+                new_hash = content_hash(synthesis)
+
+                if prev_hash is None:
+                    # Premier run : envoyer le contenu complet
+                    print('  Premier run, envoi du contenu complet')
+                    novelties = synthesis
+                elif prev_hash == new_hash:
+                    # Contenu identique : créer quand même la page Notion, mais pas d'email
+                    print('  Contenu identique au rapport précédent, pas de notification')
+                    novelties = None
+                else:
+                    # Nouveau contenu : extraire le delta via Gemini
+                    print('  Nouveau contenu détecté, extraction des nouveautés...')
+                    novelties = extract_novelties(prev_snippet or '', synthesis, config)
+
+                # 3. Créer la page Notion (toujours, même si pas de nouveautés)
                 page_title = prompt_config.get('page_title', f'Rapport {prompt_key}')
                 parent_id = prompt_config.get('parent_page_id') or config['secrets'].get('NOTION_PARENT_PAGE_ID')
 
@@ -890,36 +805,11 @@ def main():
                 if not page_id:
                     raise Exception('Échec de la création de la page Notion')
 
-                # 3. Comparer avec le run précédent et envoyer email adapté
-                old_content = get_last_content(prompt_key, last_run_file)
-                if old_content is None:
-                    # Premier run : mail complet
-                    print('  Premier run, envoi synthèse complète')
-                    send_notification_email(prompt_key, synthesis, page_title, config, page_id,
-                                            novelties=None, is_new=True)
-                else:
-                    similarity = compute_diff_score(old_content, synthesis[:5000])
-                    print(f'  Similarité avec run précédent: {similarity:.0%}')
-                    # Seuil bas pour forcer l'analyse LLM dès qu'il y a le moindre écart
-                    # Le LLM tranchera lui-même si les différences sont significatives
-                    if similarity >= 0.92:
-                        print('  Contenu quasi-identique (>92%), mail sobre "rien de nouveau"')
-                        send_notification_email(prompt_key, synthesis, page_title, config, page_id,
-                                                novelties=None, is_new=False)
-                    else:
-                        print(f'  Changements détectés ({similarity:.0%} similarité), extraction des nouveautés...')
-                        novelties = extract_novelties(old_content, synthesis, config)
-                        # Si le LLM répond "Aucune nouveauté significative", envoyer mail sobre
-                        if novelties.strip().lower().startswith('aucune nouveauté'):
-                            print('  LLM confirme : aucune nouveauté significative')
-                            send_notification_email(prompt_key, synthesis, page_title, config, page_id,
-                                                    novelties=None, is_new=False)
-                        else:
-                            send_notification_email(prompt_key, synthesis, page_title, config, page_id,
-                                                    novelties=novelties, is_new=True)
+                # 4. Envoyer email uniquement si des nouveautés ont été détectées
+                send_notification_email(prompt_key, synthesis, page_title, config, novelties)
 
-                # 4. Mettre à jour la date d'exécution et le contenu pour le prochain diff
-                update_last_run(prompt_key, last_run_file, content=synthesis)
+                # 5. Mettre à jour la date d'exécution + hash du contenu
+                update_last_run(prompt_key, last_run_file, synthesis)
 
                 executed_prompts.append({
                     'key': prompt_key,
