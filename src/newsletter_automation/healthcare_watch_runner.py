@@ -147,7 +147,18 @@ def should_run_prompt(prompt_key: str, prompt_config: Dict, last_run_file: Path)
         print(f'  Première exécution de {prompt_key}')
         return True
 
-    last_run_date = datetime.fromisoformat(last_run)
+    # Compatibilité : ancien format { "last_run": "...", ... } ou nouveau format string ISO directe
+    if isinstance(last_run, dict):
+        last_run = last_run.get('last_run', '')
+    if not last_run or not isinstance(last_run, str):
+        print(f'  Format last_run invalide pour {prompt_key}, exécution forcée')
+        return True
+
+    try:
+        last_run_date = datetime.fromisoformat(last_run)
+    except (ValueError, TypeError) as e:
+        print(f'  Date last_run invalide pour {prompt_key} ({last_run!r}): {e}, exécution forcée')
+        return True
     now = datetime.now()
     diff = now - last_run_date
     total_seconds = diff.total_seconds()
@@ -185,15 +196,26 @@ def update_last_run(prompt_key: str, last_run_file: Path, content: str = None):
 
 
 def get_previous_content(prompt_key: str, last_run_file: Path) -> Tuple[Optional[str], Optional[str]]:
-    """Retourne (hash_précédent, snippet_précédent) ou (None, None) si absent."""
+    """Retourne (hash_précédent, snippet_précédent) ou (None, None) si absent.
+    Gère la compatibilité avec l'ancien format imbriqué { prompt_key: { content_hash, content_text } }.
+    """
     if not last_run_file.exists():
         return None, None
     with open(last_run_file, 'r') as f:
         run_history = json.load(f)
-    return (
-        run_history.get(f'{prompt_key}__hash'),
-        run_history.get(f'{prompt_key}__snippet')
-    )
+
+    # Nouveau format : clés plates {prompt_key}__hash / {prompt_key}__snippet
+    prev_hash = run_history.get(f'{prompt_key}__hash')
+    prev_snippet = run_history.get(f'{prompt_key}__snippet')
+
+    # Ancien format imbriqué : { prompt_key: { "content_hash": ..., "content_text": ... } }
+    if prev_hash is None:
+        old_entry = run_history.get(prompt_key)
+        if isinstance(old_entry, dict):
+            prev_hash = old_entry.get('content_hash')
+            prev_snippet = old_entry.get('content_text', '')[:1000] if old_entry.get('content_text') else None
+
+    return prev_hash, prev_snippet
 
 
 # ==================== PERPLEXITY API ====================
@@ -407,6 +429,37 @@ def content_hash(text: str) -> str:
 
 # ==================== NOTION API ====================
 
+def parse_inline_markdown(text: str) -> list:
+    """Parse le texte inline pour extraire les liens Markdown [texte](url) en rich_text Notion."""
+    import re
+    rich_text = []
+    pattern = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
+    last_end = 0
+    for match in pattern.finditer(text):
+        # Texte avant le lien
+        before = text[last_end:match.start()]
+        if before:
+            for chunk in [before[i:i+2000] for i in range(0, len(before), 2000)]:
+                rich_text.append({'type': 'text', 'text': {'content': chunk}})
+        # Le lien lui-même
+        link_text = match.group(1)[:2000]
+        link_url = match.group(2)[:2000]
+        rich_text.append({
+            'type': 'text',
+            'text': {'content': link_text, 'link': {'url': link_url}},
+            'annotations': {'underline': True, 'color': 'blue'}
+        })
+        last_end = match.end()
+    # Texte restant
+    remaining = text[last_end:]
+    if remaining:
+        for chunk in [remaining[i:i+2000] for i in range(0, len(remaining), 2000)]:
+            rich_text.append({'type': 'text', 'text': {'content': chunk}})
+    if not rich_text:
+        rich_text.append({'type': 'text', 'text': {'content': ''}})
+    return rich_text
+
+
 def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
     """Convertit du contenu markdown en blocs Notion"""
     blocks = []
@@ -438,20 +491,11 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
         if current_paragraph:
             text = '\n'.join(current_paragraph).strip()
             if text:
-                # Notion limite à 2000 caractères par bloc rich_text
-                while text:
-                    chunk = text[:2000]
-                    text = text[2000:]
-                    blocks.append({
-                        'object': 'block',
-                        'type': 'paragraph',
-                        'paragraph': {
-                            'rich_text': [{
-                                'type': 'text',
-                                'text': {'content': chunk}
-                            }]
-                        }
-                    })
+                blocks.append({
+                    'object': 'block',
+                    'type': 'paragraph',
+                    'paragraph': {'rich_text': parse_inline_markdown(text[:2000])}
+                })
             current_paragraph.clear()
 
     for line in lines:
@@ -467,12 +511,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'heading_1',
-                'heading_1': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[2:].strip()[:2000]}
-                    }]
-                }
+                'heading_1': {'rich_text': parse_inline_markdown(stripped[2:].strip()[:2000])}
             })
         # Heading 2
         elif stripped.startswith('## ') and not stripped.startswith('###'):
@@ -480,12 +519,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'heading_2',
-                'heading_2': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[3:].strip()[:2000]}
-                    }]
-                }
+                'heading_2': {'rich_text': parse_inline_markdown(stripped[3:].strip()[:2000])}
             })
         # Heading 3
         elif stripped.startswith('### '):
@@ -493,12 +527,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'heading_3',
-                'heading_3': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[4:].strip()[:2000]}
-                    }]
-                }
+                'heading_3': {'rich_text': parse_inline_markdown(stripped[4:].strip()[:2000])}
             })
         # Bulleted list item
         elif stripped.startswith('- ') or stripped.startswith('* '):
@@ -506,12 +535,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'bulleted_list_item',
-                'bulleted_list_item': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[2:].strip()[:2000]}
-                    }]
-                }
+                'bulleted_list_item': {'rich_text': parse_inline_markdown(stripped[2:].strip()[:2000])}
             })
         # Numbered list item (ex: "1. texte")
         elif len(stripped) > 2 and stripped[0].isdigit() and '. ' in stripped[:5]:
@@ -520,12 +544,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'numbered_list_item',
-                'numbered_list_item': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': text_content.strip()[:2000]}
-                    }]
-                }
+                'numbered_list_item': {'rich_text': parse_inline_markdown(text_content.strip()[:2000])}
             })
         # Ligne horizontale
         elif stripped in ('---', '***', '___'):
