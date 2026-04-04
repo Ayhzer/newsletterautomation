@@ -413,7 +413,7 @@ Ta tâche :
 Réponse (nouveautés uniquement ou AUCUNE_NOUVEAUTÉ) :"""
 
     try:
-        result = query_gemini(prompt, config, {'max_tokens': 1000, 'temperature': 0.1})
+        result = query_gemini(prompt, config, {'max_tokens': 2000, 'temperature': 0.1})
         result = result.strip()
         if result == 'AUCUNE_NOUVEAUTÉ' or 'aucune nouveauté' in result.lower():
             return None
@@ -659,7 +659,8 @@ def send_gmail(service, to_email: str, subject: str, text_body: str, html_body: 
 # ==================== EMAIL NOTIFICATIONS ====================
 
 def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
-                             config: Dict, novelties: Optional[str] = None) -> bool:
+                             config: Dict, novelties: Optional[str] = None,
+                             notion_page_id: Optional[str] = None) -> bool:
     """Envoie un email de notification via Gmail API.
     Si novelties est fourni, n'envoie que les nouveautés. Si None, aucune nouveauté → skip.
     Si novelties vaut synthesis (premier run ou Gemini absent), envoie le contenu complet.
@@ -684,12 +685,18 @@ def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
     section_label = 'Synthèse complète' if is_full else 'Nouveautés détectées'
     subject = f'Healthcare Watch - {page_title}' if is_full else f'[Nouveautés] Healthcare Watch - {page_title}'
 
+    # Lien vers la page Notion
+    notion_url = None
+    if notion_page_id:
+        notion_url = f"https://notion.so/{notion_page_id.replace('-', '')}"
+
     try:
         service = get_gmail_service(config)
 
+        notion_link_text = f"\n\nVoir le rapport complet sur Notion : {notion_url}" if notion_url else ""
         text = f"""Bonjour,
 
-Le rapport "{page_title}" a été généré et ajouté à Notion.
+Le rapport "{page_title}" a été généré et ajouté à Notion.{notion_link_text}
 
 {section_label}:
 {novelties}
@@ -698,14 +705,31 @@ Le rapport "{page_title}" a été généré et ajouté à Notion.
 Healthcare Watch - Newsletter automatisée
 """
 
-        safe_novelties = novelties.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         header_color = '#2c3e50' if is_full else '#e67e22'
-        html = f"""<html><body>
+        notion_button = f'<p><a href="{notion_url}" style="display:inline-block; background-color:#2c3e50; color:#fff; padding:10px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">&#128196; Voir le rapport complet sur Notion</a></p>' if notion_url else ''
+        # Convertit le markdown en HTML simple (bullet points, gras, titres)
+        html_body = ''
+        for line in novelties.splitlines():
+            line_esc = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            if line_esc.startswith('## '):
+                html_body += f'<h3 style="color:{header_color};">{line_esc[3:]}</h3>\n'
+            elif line_esc.startswith('# '):
+                html_body += f'<h2 style="color:{header_color};">{line_esc[2:]}</h2>\n'
+            elif line_esc.startswith('* ') or line_esc.startswith('- '):
+                html_body += f'<li style="margin-bottom:6px;">{line_esc[2:]}</li>\n'
+            elif line_esc.strip() == '':
+                html_body += '<br>\n'
+            else:
+                html_body += f'<p style="margin:4px 0;">{line_esc}</p>\n'
+        html = f"""<html><body style="font-family:Arial,sans-serif; max-width:700px; margin:0 auto; padding:20px;">
 <h2 style="color: {header_color};">{section_label}</h2>
 <p>Le rapport <strong>{page_title}</strong> a été généré et ajouté à Notion.</p>
-<h3>{section_label} :</h3>
-<pre style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">{safe_novelties}</pre>
-<hr>
+{notion_button}
+<h3 style="border-bottom:2px solid {header_color}; padding-bottom:6px;">{section_label} :</h3>
+<div style="background-color:#f9f9f9; padding:15px; border-radius:5px; border-left:4px solid {header_color};">
+{html_body}
+</div>
+<hr style="margin-top:30px;">
 <p style="color: #888; font-size: 0.9em;"><em>Healthcare Watch - Newsletter automatisée</em></p>
 </body></html>"""
 
@@ -825,7 +849,7 @@ def main():
                     raise Exception('Échec de la création de la page Notion')
 
                 # 4. Envoyer email uniquement si des nouveautés ont été détectées
-                send_notification_email(prompt_key, synthesis, page_title, config, novelties)
+                send_notification_email(prompt_key, synthesis, page_title, config, novelties, page_id)
 
                 # 5. Mettre à jour la date d'exécution + hash du contenu
                 update_last_run(prompt_key, last_run_file, synthesis)
