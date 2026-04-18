@@ -147,7 +147,18 @@ def should_run_prompt(prompt_key: str, prompt_config: Dict, last_run_file: Path)
         print(f'  Première exécution de {prompt_key}')
         return True
 
-    last_run_date = datetime.fromisoformat(last_run)
+    # Compatibilité : ancien format { "last_run": "...", ... } ou nouveau format string ISO directe
+    if isinstance(last_run, dict):
+        last_run = last_run.get('last_run', '')
+    if not last_run or not isinstance(last_run, str):
+        print(f'  Format last_run invalide pour {prompt_key}, exécution forcée')
+        return True
+
+    try:
+        last_run_date = datetime.fromisoformat(last_run)
+    except (ValueError, TypeError) as e:
+        print(f'  Date last_run invalide pour {prompt_key} ({last_run!r}): {e}, exécution forcée')
+        return True
     now = datetime.now()
     diff = now - last_run_date
     total_seconds = diff.total_seconds()
@@ -185,15 +196,26 @@ def update_last_run(prompt_key: str, last_run_file: Path, content: str = None):
 
 
 def get_previous_content(prompt_key: str, last_run_file: Path) -> Tuple[Optional[str], Optional[str]]:
-    """Retourne (hash_précédent, snippet_précédent) ou (None, None) si absent."""
+    """Retourne (hash_précédent, snippet_précédent) ou (None, None) si absent.
+    Gère la compatibilité avec l'ancien format imbriqué { prompt_key: { content_hash, content_text } }.
+    """
     if not last_run_file.exists():
         return None, None
     with open(last_run_file, 'r') as f:
         run_history = json.load(f)
-    return (
-        run_history.get(f'{prompt_key}__hash'),
-        run_history.get(f'{prompt_key}__snippet')
-    )
+
+    # Nouveau format : clés plates {prompt_key}__hash / {prompt_key}__snippet
+    prev_hash = run_history.get(f'{prompt_key}__hash')
+    prev_snippet = run_history.get(f'{prompt_key}__snippet')
+
+    # Ancien format imbriqué : { prompt_key: { "content_hash": ..., "content_text": ... } }
+    if prev_hash is None:
+        old_entry = run_history.get(prompt_key)
+        if isinstance(old_entry, dict):
+            prev_hash = old_entry.get('content_hash')
+            prev_snippet = old_entry.get('content_text', '')[:1000] if old_entry.get('content_text') else None
+
+    return prev_hash, prev_snippet
 
 
 # ==================== PERPLEXITY API ====================
@@ -391,7 +413,7 @@ Ta tâche :
 Réponse (nouveautés uniquement ou AUCUNE_NOUVEAUTÉ) :"""
 
     try:
-        result = query_gemini(prompt, config, {'max_tokens': 1000, 'temperature': 0.1})
+        result = query_gemini(prompt, config, {'max_tokens': 2000, 'temperature': 0.1})
         result = result.strip()
         if result == 'AUCUNE_NOUVEAUTÉ' or 'aucune nouveauté' in result.lower():
             return None
@@ -406,6 +428,37 @@ def content_hash(text: str) -> str:
 
 
 # ==================== NOTION API ====================
+
+def parse_inline_markdown(text: str) -> list:
+    """Parse le texte inline pour extraire les liens Markdown [texte](url) en rich_text Notion."""
+    import re
+    rich_text = []
+    pattern = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
+    last_end = 0
+    for match in pattern.finditer(text):
+        # Texte avant le lien
+        before = text[last_end:match.start()]
+        if before:
+            for chunk in [before[i:i+2000] for i in range(0, len(before), 2000)]:
+                rich_text.append({'type': 'text', 'text': {'content': chunk}})
+        # Le lien lui-même
+        link_text = match.group(1)[:2000]
+        link_url = match.group(2)[:2000]
+        rich_text.append({
+            'type': 'text',
+            'text': {'content': link_text, 'link': {'url': link_url}},
+            'annotations': {'underline': True, 'color': 'blue'}
+        })
+        last_end = match.end()
+    # Texte restant
+    remaining = text[last_end:]
+    if remaining:
+        for chunk in [remaining[i:i+2000] for i in range(0, len(remaining), 2000)]:
+            rich_text.append({'type': 'text', 'text': {'content': chunk}})
+    if not rich_text:
+        rich_text.append({'type': 'text', 'text': {'content': ''}})
+    return rich_text
+
 
 def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
     """Convertit du contenu markdown en blocs Notion"""
@@ -438,20 +491,11 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
         if current_paragraph:
             text = '\n'.join(current_paragraph).strip()
             if text:
-                # Notion limite à 2000 caractères par bloc rich_text
-                while text:
-                    chunk = text[:2000]
-                    text = text[2000:]
-                    blocks.append({
-                        'object': 'block',
-                        'type': 'paragraph',
-                        'paragraph': {
-                            'rich_text': [{
-                                'type': 'text',
-                                'text': {'content': chunk}
-                            }]
-                        }
-                    })
+                blocks.append({
+                    'object': 'block',
+                    'type': 'paragraph',
+                    'paragraph': {'rich_text': parse_inline_markdown(text[:2000])}
+                })
             current_paragraph.clear()
 
     for line in lines:
@@ -467,12 +511,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'heading_1',
-                'heading_1': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[2:].strip()[:2000]}
-                    }]
-                }
+                'heading_1': {'rich_text': parse_inline_markdown(stripped[2:].strip()[:2000])}
             })
         # Heading 2
         elif stripped.startswith('## ') and not stripped.startswith('###'):
@@ -480,12 +519,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'heading_2',
-                'heading_2': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[3:].strip()[:2000]}
-                    }]
-                }
+                'heading_2': {'rich_text': parse_inline_markdown(stripped[3:].strip()[:2000])}
             })
         # Heading 3
         elif stripped.startswith('### '):
@@ -493,12 +527,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'heading_3',
-                'heading_3': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[4:].strip()[:2000]}
-                    }]
-                }
+                'heading_3': {'rich_text': parse_inline_markdown(stripped[4:].strip()[:2000])}
             })
         # Bulleted list item
         elif stripped.startswith('- ') or stripped.startswith('* '):
@@ -506,12 +535,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'bulleted_list_item',
-                'bulleted_list_item': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': stripped[2:].strip()[:2000]}
-                    }]
-                }
+                'bulleted_list_item': {'rich_text': parse_inline_markdown(stripped[2:].strip()[:2000])}
             })
         # Numbered list item (ex: "1. texte")
         elif len(stripped) > 2 and stripped[0].isdigit() and '. ' in stripped[:5]:
@@ -520,12 +544,7 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             blocks.append({
                 'object': 'block',
                 'type': 'numbered_list_item',
-                'numbered_list_item': {
-                    'rich_text': [{
-                        'type': 'text',
-                        'text': {'content': text_content.strip()[:2000]}
-                    }]
-                }
+                'numbered_list_item': {'rich_text': parse_inline_markdown(text_content.strip()[:2000])}
             })
         # Ligne horizontale
         elif stripped in ('---', '***', '___'):
@@ -640,7 +659,8 @@ def send_gmail(service, to_email: str, subject: str, text_body: str, html_body: 
 # ==================== EMAIL NOTIFICATIONS ====================
 
 def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
-                             config: Dict, novelties: Optional[str] = None) -> bool:
+                             config: Dict, novelties: Optional[str] = None,
+                             notion_page_id: Optional[str] = None) -> bool:
     """Envoie un email de notification via Gmail API.
     Si novelties est fourni, n'envoie que les nouveautés. Si None, aucune nouveauté → skip.
     Si novelties vaut synthesis (premier run ou Gemini absent), envoie le contenu complet.
@@ -665,12 +685,18 @@ def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
     section_label = 'Synthèse complète' if is_full else 'Nouveautés détectées'
     subject = f'Healthcare Watch - {page_title}' if is_full else f'[Nouveautés] Healthcare Watch - {page_title}'
 
+    # Lien vers la page Notion
+    notion_url = None
+    if notion_page_id:
+        notion_url = f"https://notion.so/{notion_page_id.replace('-', '')}"
+
     try:
         service = get_gmail_service(config)
 
+        notion_link_text = f"\n\nVoir le rapport complet sur Notion : {notion_url}" if notion_url else ""
         text = f"""Bonjour,
 
-Le rapport "{page_title}" a été généré et ajouté à Notion.
+Le rapport "{page_title}" a été généré et ajouté à Notion.{notion_link_text}
 
 {section_label}:
 {novelties}
@@ -679,14 +705,31 @@ Le rapport "{page_title}" a été généré et ajouté à Notion.
 Healthcare Watch - Newsletter automatisée
 """
 
-        safe_novelties = novelties.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         header_color = '#2c3e50' if is_full else '#e67e22'
-        html = f"""<html><body>
+        notion_button = f'<p><a href="{notion_url}" style="display:inline-block; background-color:#2c3e50; color:#fff; padding:10px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">&#128196; Voir le rapport complet sur Notion</a></p>' if notion_url else ''
+        # Convertit le markdown en HTML simple (bullet points, gras, titres)
+        html_body = ''
+        for line in novelties.splitlines():
+            line_esc = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            if line_esc.startswith('## '):
+                html_body += f'<h3 style="color:{header_color};">{line_esc[3:]}</h3>\n'
+            elif line_esc.startswith('# '):
+                html_body += f'<h2 style="color:{header_color};">{line_esc[2:]}</h2>\n'
+            elif line_esc.startswith('* ') or line_esc.startswith('- '):
+                html_body += f'<li style="margin-bottom:6px;">{line_esc[2:]}</li>\n'
+            elif line_esc.strip() == '':
+                html_body += '<br>\n'
+            else:
+                html_body += f'<p style="margin:4px 0;">{line_esc}</p>\n'
+        html = f"""<html><body style="font-family:Arial,sans-serif; max-width:700px; margin:0 auto; padding:20px;">
 <h2 style="color: {header_color};">{section_label}</h2>
 <p>Le rapport <strong>{page_title}</strong> a été généré et ajouté à Notion.</p>
-<h3>{section_label} :</h3>
-<pre style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; white-space: pre-wrap;">{safe_novelties}</pre>
-<hr>
+{notion_button}
+<h3 style="border-bottom:2px solid {header_color}; padding-bottom:6px;">{section_label} :</h3>
+<div style="background-color:#f9f9f9; padding:15px; border-radius:5px; border-left:4px solid {header_color};">
+{html_body}
+</div>
+<hr style="margin-top:30px;">
 <p style="color: #888; font-size: 0.9em;"><em>Healthcare Watch - Newsletter automatisée</em></p>
 </body></html>"""
 
@@ -806,7 +849,7 @@ def main():
                     raise Exception('Échec de la création de la page Notion')
 
                 # 4. Envoyer email uniquement si des nouveautés ont été détectées
-                send_notification_email(prompt_key, synthesis, page_title, config, novelties)
+                send_notification_email(prompt_key, synthesis, page_title, config, novelties, page_id)
 
                 # 5. Mettre à jour la date d'exécution + hash du contenu
                 update_last_run(prompt_key, last_run_file, synthesis)
