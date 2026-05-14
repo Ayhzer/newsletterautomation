@@ -334,22 +334,47 @@ def get_or_create_label(service, label_name):
 
 def mark_emails_as_read_and_label(service, email_ids, label_name='newletterinnotion'):
     """Marque les emails comme lus, les déplace dans un libellé et les retire de la boite de réception"""
-    print('✓ Marquage des emails comme lus...')
-    
+    if not email_ids:
+        print('⚠️  Aucun email à marquer')
+        return
+
+    print(f'✓ Marquage de {len(email_ids)} email(s) comme lus...')
+
     # Obtenir ou créer le libellé
     label_id = get_or_create_label(service, label_name)
-    
-    # Appliquer les modifications
-    service.users().messages().batchModify(
-        userId='me',
-        body={
-            'ids': email_ids,
-            'removeLabelIds': ['UNREAD', 'INBOX', 'IMPORTANT'],
-            'addLabelIds': [label_id]
-        }
-    ).execute()
-    
-    print(f'✅ Emails marqués comme lus, étiquetés "{label_name}" et retirés de la boite de réception')
+
+    # batchModify traite max 1000 IDs à la fois
+    batch_size = 1000
+    for i in range(0, len(email_ids), batch_size):
+        batch = email_ids[i:i + batch_size]
+        service.users().messages().batchModify(
+            userId='me',
+            body={
+                'ids': batch,
+                'removeLabelIds': ['UNREAD', 'INBOX', 'IMPORTANT'],
+                'addLabelIds': [label_id]
+            }
+        ).execute()
+
+    # Vérification : relire le premier email pour confirmer que UNREAD est retiré
+    try:
+        check = service.users().messages().get(
+            userId='me', id=email_ids[0], format='minimal'
+        ).execute()
+        labels_remaining = check.get('labelIds', [])
+        if 'UNREAD' in labels_remaining:
+            print('⚠️  Le label UNREAD est encore présent sur le premier email — nouvelle tentative individuelle...')
+            for eid in email_ids:
+                service.users().messages().modify(
+                    userId='me',
+                    id=eid,
+                    body={'removeLabelIds': ['UNREAD', 'INBOX', 'IMPORTANT'], 'addLabelIds': [label_id]}
+                ).execute()
+            print('✅ Marquage individuel effectué')
+        else:
+            print(f'✅ Emails marqués comme lus, étiquetés "{label_name}" et retirés de la boite de réception')
+    except Exception as e:
+        print(f'⚠️  Impossible de vérifier le marquage: {e}')
 
 
 def send_notification(service, notion_url, synthesis_path, emails=None, notebooklm_url=None, synthesis_source='perplexity', synthesis_text=None):
