@@ -16,6 +16,7 @@ import yaml
 import base64
 import hashlib
 import importlib.util
+import re
 from pathlib import Path
 from datetime import datetime
 from email.mime.text import MIMEText
@@ -71,14 +72,15 @@ def load_config() -> Dict:
         config = yaml.safe_load(f)
 
     # Charger les secrets depuis les variables d'environnement
-    perplexity_key = os.environ.get('PERPLEXITY_API_KEY', '')
+    tavily_key = os.environ.get('TAVILY_API_KEY', '')
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
+    groq_key = os.environ.get('GROQ_API_KEY', '')
     notion_token = os.environ.get('NOTION_TOKEN', '')
     notion_parent_page_id = os.environ.get('NOTION_PARENT_PAGE_ID', '')
     notification_email = os.environ.get('NOTIFICATION_EMAIL', '')
 
     # Fallback sur config.py si variables d'environnement manquantes (dev local)
-    if not all([notion_token]):
+    if not notion_token:
         print('Variables env manquantes, tentative de chargement config.py...')
         config_py = CONFIG_DIR / 'config.py'
         if config_py.exists():
@@ -86,26 +88,28 @@ def load_config() -> Dict:
             config_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(config_module)
             cfg = config_module.CONFIG
-            perplexity_key = perplexity_key or cfg.get('PERPLEXITY_API_KEY', '')
+            tavily_key = tavily_key or cfg.get('TAVILY_API_KEY', '')
             gemini_key = gemini_key or cfg.get('GEMINI_API_KEY', '')
+            groq_key = groq_key or cfg.get('GROQ_API_KEY', '')
             notion_token = notion_token or cfg.get('NOTION_TOKEN', '')
             notion_parent_page_id = notion_parent_page_id or cfg.get('NOTION_PARENT_PAGE_ID', '')
             notification_email = notification_email or cfg.get('NOTIFICATION_EMAIL', '')
 
     config['secrets'] = {
-        'PERPLEXITY_API_KEY': perplexity_key,
+        'TAVILY_API_KEY': tavily_key,
         'GEMINI_API_KEY': gemini_key,
+        'GROQ_API_KEY': groq_key,
         'NOTION_TOKEN': notion_token,
         'NOTION_PARENT_PAGE_ID': notion_parent_page_id,
         'NOTIFICATION_EMAIL': notification_email,
         'GOOGLE_OAUTH_TOKEN_JSON': os.environ.get('GOOGLE_OAUTH_TOKEN_JSON', ''),
     }
 
-    # Valider les secrets requis : au moins une clé AI + Notion
-    if not perplexity_key and not gemini_key:
-        raise ValueError("Secrets manquants: PERPLEXITY_API_KEY et/ou GEMINI_API_KEY requis")
+    # Valider les secrets requis
     if not notion_token:
         raise ValueError("Secrets manquants: NOTION_TOKEN")
+    if not tavily_key and not gemini_key:
+        print('ATTENTION: TAVILY_API_KEY et GEMINI_API_KEY non configurées — les rapports seront indisponibles')
 
     # Vérifier Gmail API seulement si notifications activées
     notifications_enabled = config.get('general', {}).get('notifications', {}).get('enabled', False)
@@ -218,172 +222,246 @@ def get_previous_content(prompt_key: str, last_run_file: Path) -> Tuple[Optional
     return prev_hash, prev_snippet
 
 
-# ==================== PERPLEXITY API ====================
+# ==================== LLM BACKENDS ====================
 
-def query_perplexity(prompt: str, config: Dict, options: Dict = None) -> str:
-    """Interroge l'API Perplexity avec le prompt fourni"""
-    api_key = config['secrets']['PERPLEXITY_API_KEY']
+_SYSTEM_PROMPT_FR = (
+    'Tu es un expert en veille réglementaire et cybersécurité dans le domaine de la santé en France. '
+    'Synthétise les informations fournies en Markdown structuré, lisible et intégrable dans Notion.'
+)
 
-    if not api_key:
-        raise ValueError("PERPLEXITY_API_KEY n'est pas configurée")
 
-    default_options = {
-        'max_tokens': 2000,
-        'temperature': 0.3,
-        'model': 'sonar'
-    }
-    if options:
-        default_options.update(options)
+def _api_options(options: Dict) -> Dict:
+    """Filtre les clés internes (_*) avant envoi aux APIs."""
+    return {k: v for k, v in (options or {}).items() if not k.startswith('_')}
 
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json',
-        'User-Agent': 'NewsletterAutomation-HealthcareWatch/1.0'
-    }
 
+def query_tavily(query: str, config: Dict, options: Dict = None) -> dict:
+    """Interroge l'API Tavily. Retourne {'answer': str, 'results': list}."""
+    api_key = config['secrets']['TAVILY_API_KEY']
+    opts = _api_options(options)
     payload = {
-        'model': default_options['model'],
-        'messages': [
-            {
-                'role': 'system',
-                'content': 'Tu es un expert en domaine sanitaire fournissant des informations factuelles et à jour.'
-            },
-            {
-                'role': 'user',
-                'content': prompt
-            }
-        ],
-        'max_tokens': default_options['max_tokens'],
-        'temperature': default_options['temperature']
+        'api_key': api_key,
+        'query': query,
+        'include_answer': True,
+        'include_raw_content': False,
+        'max_results': opts.get('max_results', 8),
+        'search_depth': opts.get('search_depth', 'basic'),
+        'topic': opts.get('topic', 'news'),
     }
-
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            print(f'  Appel Perplexity (tentative {attempt + 1}/{max_retries})...')
-            response = requests.post(
-                'https://api.perplexity.ai/chat/completions',
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-
+            print(f'  Appel Tavily (tentative {attempt + 1}/{max_retries})...')
+            response = requests.post('https://api.tavily.com/search', json=payload, timeout=30)
             if response.status_code == 401:
-                raise ValueError('Authentification Perplexity échouée (401)')
+                raise ValueError('Authentification Tavily échouée (401)')
             elif response.status_code == 429:
-                print('  Limite de débit atteinte, attente 30s...')
+                print('  Limite de débit Tavily, attente 30s...')
                 time.sleep(30)
                 continue
             elif response.status_code >= 500:
-                print('  Erreur serveur, nouvelle tentative...')
+                print('  Erreur serveur Tavily, nouvelle tentative...')
                 time.sleep(5)
                 continue
             elif response.status_code != 200:
-                raise ValueError(f'Erreur API Perplexity: {response.status_code} - {response.text}')
-
-            data = response.json()
-            if 'choices' not in data or not data['choices']:
-                raise ValueError('Format de réponse invalide')
-
-            synthesis = data['choices'][0]['message']['content']
-            print('  Réponse reçue de Perplexity')
-            return synthesis
-
+                raise ValueError(f'Erreur API Tavily: {response.status_code} - {response.text}')
+            print('  Réponse reçue de Tavily')
+            return response.json()
         except requests.exceptions.Timeout:
             if attempt < max_retries - 1:
                 time.sleep(5)
                 continue
-            raise TimeoutError('Timeout Perplexity API')
-        except requests.exceptions.RequestException as e:
+            raise TimeoutError('Timeout Tavily API')
+        except requests.exceptions.RequestException:
             if attempt < max_retries - 1:
                 time.sleep(5)
                 continue
             raise
+    raise Exception('Impossible de contacter Tavily API après 3 tentatives')
 
-    raise Exception('Impossible de contacter Perplexity API après 3 tentatives')
+
+def format_tavily_context(data: dict) -> str:
+    """Formate la réponse Tavily en Markdown pour Notion."""
+    lines = []
+    answer = data.get('answer', '').strip()
+    if answer:
+        lines.append('## Synthèse Tavily\n')
+        lines.append(answer)
+        lines.append('')
+    results = data.get('results', [])
+    if results:
+        lines.append('## Sources\n')
+        for r in results:
+            title = r.get('title', 'Sans titre')
+            url = r.get('url', '')
+            content = r.get('content', '')[:300].strip()
+            lines.append(f'### {title}')
+            if url:
+                lines.append(f'> {url}')
+            if content:
+                lines.append(content)
+            lines.append('')
+    return '\n'.join(lines)
 
 
-# ==================== GEMINI API (FALLBACK) ====================
-
-def query_gemini(prompt: str, config: Dict, options: Dict = None) -> str:
-    """Interroge l'API Google Gemini avec le prompt fourni (fallback)"""
+def query_gemini(system_prompt: str, user_content: str, config: Dict, options: Dict = None) -> str:
+    """Synthèse via Gemini 2.5 Flash."""
     api_key = config['secrets']['GEMINI_API_KEY']
-
     if not api_key:
         raise ValueError("GEMINI_API_KEY n'est pas configurée")
-
-    default_options = {'max_tokens': 8192, 'temperature': 0.3}
-    if options:
-        default_options.update(options)
-
+    opts = _api_options(options)
     url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}'
     payload = {
-        'systemInstruction': {'parts': [{'text': 'Tu es un expert en domaine sanitaire fournissant des informations factuelles et à jour.'}]},
-        'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+        'contents': [{'parts': [{'text': f'{system_prompt}\n\n{user_content}'}]}],
         'generationConfig': {
-            'maxOutputTokens': default_options['max_tokens'],
-            'temperature': default_options['temperature']
+            'maxOutputTokens': opts.get('max_tokens', 8192),
+            'temperature': opts.get('temperature', 0.3)
         }
     }
-
     max_retries = 3
     for attempt in range(max_retries):
         try:
             print(f'  Appel Gemini (tentative {attempt + 1}/{max_retries})...')
             response = requests.post(url, json=payload, timeout=60)
-
-            if response.status_code == 401:
-                raise ValueError('Authentification Gemini échouée (401). Vérifiez GEMINI_API_KEY')
-            elif response.status_code == 429:
-                print('  Limite de débit Gemini atteinte, attente 65s...')
+            if response.status_code == 429:
+                print('  Limite de débit Gemini, attente 65s...')
                 time.sleep(65)
                 continue
             elif response.status_code >= 500:
-                print('  Erreur serveur Gemini, nouvelle tentative...')
                 time.sleep(5)
                 continue
             elif response.status_code != 200:
                 raise ValueError(f'Erreur API Gemini: {response.status_code} - {response.text}')
-
             data = response.json()
             candidate = data['candidates'][0]
-            synthesis = candidate['content']['parts'][0]['text']
+            text = candidate['content']['parts'][0]['text']
             finish_reason = candidate.get('finishReason', 'UNKNOWN')
             if finish_reason == 'MAX_TOKENS':
                 print('  AVERTISSEMENT: Gemini a atteint MAX_TOKENS — réponse peut être tronquée')
             print(f'  Réponse reçue de Gemini (finishReason: {finish_reason})')
-            return synthesis
-
+            return text
         except requests.exceptions.Timeout:
             if attempt < max_retries - 1:
                 time.sleep(5)
                 continue
             raise TimeoutError('Timeout Gemini API')
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             if attempt < max_retries - 1:
                 time.sleep(5)
                 continue
             raise
-
     raise Exception('Impossible de contacter Gemini API après 3 tentatives')
 
 
-def query_with_fallback(prompt: str, config: Dict, options: Dict = None) -> str:
-    """Tente Perplexity, bascule sur Gemini en cas d'échec"""
-    perplexity_key = config['secrets'].get('PERPLEXITY_API_KEY', '').strip()
-    gemini_key = config['secrets'].get('GEMINI_API_KEY', '').strip()
-    print(f'  [fallback] perplexity_key présente: {bool(perplexity_key)}, gemini_key présente: {bool(gemini_key)}')
-
-    if perplexity_key:
+def query_groq(system_prompt: str, user_content: str, config: Dict, options: Dict = None) -> str:
+    """Synthèse via Groq (fallback, OpenAI-compatible)."""
+    api_key = config['secrets']['GROQ_API_KEY']
+    if not api_key:
+        raise ValueError("GROQ_API_KEY n'est pas configurée")
+    opts = _api_options(options)
+    payload = {
+        'model': 'llama-3.3-70b-versatile',
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_content}
+        ],
+        'max_tokens': opts.get('max_tokens', 2000),
+        'temperature': opts.get('temperature', 0.3)
+    }
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            return query_perplexity(prompt, config, options)
-        except Exception as e:
-            print(f'  Perplexity a échoué ({type(e).__name__}): {e}')
-            print('  Basculement sur Gemini...')
-    else:
-        print('  PERPLEXITY_API_KEY non configurée, utilisation de Gemini directement.')
+            print(f'  Appel Groq (tentative {attempt + 1}/{max_retries})...')
+            response = requests.post(
+                'https://api.groq.com/openai/v1/chat/completions',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json=payload, timeout=60
+            )
+            if response.status_code == 429:
+                print('  Limite de débit Groq, attente 30s...')
+                time.sleep(30)
+                continue
+            elif response.status_code >= 500:
+                time.sleep(5)
+                continue
+            elif response.status_code != 200:
+                raise ValueError(f'Erreur API Groq: {response.status_code} - {response.text}')
+            text = response.json()['choices'][0]['message']['content']
+            print('  Réponse reçue de Groq')
+            return text
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                time.sleep(5)
+                continue
+            raise TimeoutError('Timeout Groq API')
+        except requests.exceptions.RequestException:
+            if attempt < max_retries - 1:
+                time.sleep(5)
+                continue
+            raise
+    raise Exception('Impossible de contacter Groq API après 3 tentatives')
 
-    return query_gemini(prompt, config, options)
+
+def query_with_fallback(prompt: str, config: Dict, options: Dict = None) -> Tuple[str, str]:
+    """Recherche Tavily + synthèse LLM avec cascade Tavily→Gemini→Groq.
+    Retourne un tuple (synthesis, source)."""
+    opts = options or {}
+    prompt_cfg = opts.get('_prompt_config', {})
+    search_query = prompt_cfg.get('search_query', prompt[:200])
+
+    # 1. Tavily search
+    if config['secrets'].get('TAVILY_API_KEY', '').strip():
+        try:
+            tavily_data = query_tavily(search_query, config, opts)
+            tavily_context = format_tavily_context(tavily_data)
+            user_content = f'{tavily_context}\n\n---\n\n{prompt}'
+
+            # 2a. Gemini synthesis
+            if config['secrets'].get('GEMINI_API_KEY', '').strip():
+                try:
+                    synthesis = query_gemini(_SYSTEM_PROMPT_FR, user_content, config, opts)
+                    return synthesis, 'tavily+gemini'
+                except Exception as e:
+                    print(f'  Gemini échoué: {e}')
+
+            # 2b. Groq fallback
+            if config['secrets'].get('GROQ_API_KEY', '').strip():
+                try:
+                    synthesis = query_groq(_SYSTEM_PROMPT_FR, user_content, config, opts)
+                    return synthesis, 'tavily+groq'
+                except Exception as e:
+                    print(f'  Groq échoué: {e}')
+
+            # 2c. Tavily answer seul (sans LLM)
+            return tavily_context, 'tavily'
+
+        except Exception as e:
+            print(f'  Tavily échoué: {e}')
+    else:
+        print('  TAVILY_API_KEY non configurée, tentative Gemini direct...')
+
+    # 3. Gemini direct (sans Tavily)
+    if config['secrets'].get('GEMINI_API_KEY', '').strip():
+        try:
+            synthesis = query_gemini(_SYSTEM_PROMPT_FR, prompt, config, opts)
+            return synthesis, 'gemini'
+        except Exception as e:
+            print(f'  Gemini direct échoué: {e}')
+
+    # 4. Groq direct
+    if config['secrets'].get('GROQ_API_KEY', '').strip():
+        try:
+            synthesis = query_groq(_SYSTEM_PROMPT_FR, prompt, config, opts)
+            return synthesis, 'groq'
+        except Exception as e:
+            print(f'  Groq direct échoué: {e}')
+
+    fallback_text = (
+        "## Rapport indisponible\n\n"
+        "Aucune source de données n'est disponible.\n\n"
+        f"Prompt concerné :\n\n```\n{prompt[:500]}{'...' if len(prompt) > 500 else ''}\n```"
+    )
+    return fallback_text, 'unavailable'
 
 
 # ==================== DELTA / NOUVEAUTÉS ====================
@@ -413,7 +491,7 @@ Ta tâche :
 Réponse (nouveautés uniquement ou AUCUNE_NOUVEAUTÉ) :"""
 
     try:
-        result = query_gemini(prompt, config, {'max_tokens': 2000, 'temperature': 0.1})
+        result = query_gemini('Tu es un assistant de comparaison de rapports.', prompt, config, {'max_tokens': 2000, 'temperature': 0.1})
         result = result.strip()
         if result == 'AUCUNE_NOUVEAUTÉ' or 'aucune nouveauté' in result.lower():
             return None
@@ -431,7 +509,6 @@ def content_hash(text: str) -> str:
 
 def parse_inline_markdown(text: str) -> list:
     """Parse le texte inline pour extraire les liens Markdown [texte](url) en rich_text Notion."""
-    import re
     rich_text = []
     pattern = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
     last_end = 0
@@ -558,12 +635,6 @@ def markdown_to_notion_blocks(content: str, timestamp: str) -> list:
             current_paragraph.append(stripped)
 
     flush_paragraph()
-
-    # Notion API limite à 100 blocs par appel
-    if len(blocks) > 100:
-        blocks = blocks[:100]
-        print(f'  ATTENTION: Contenu tronqué à 100 blocs (limite Notion API)')
-
     return blocks
 
 
@@ -594,11 +665,16 @@ def create_notion_page(title: str, content: str, parent_page_id: str,
                     }]
                 }
             },
-            children=blocks
+            children=blocks[:100]
         )
 
         page_id = response['id']
-        print(f'  Page créée: {page_id}')
+
+        # Insérer les blocs restants par batch de 100
+        for i in range(100, len(blocks), 100):
+            notion.blocks.children.append(block_id=page_id, children=blocks[i:i + 100])
+
+        print(f'  Page créée: {page_id} ({len(blocks)} blocs)')
         return page_id
 
     except Exception as e:
@@ -660,7 +736,8 @@ def send_gmail(service, to_email: str, subject: str, text_body: str, html_body: 
 
 def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
                              config: Dict, novelties: Optional[str] = None,
-                             notion_page_id: Optional[str] = None) -> bool:
+                             notion_page_id: Optional[str] = None,
+                             synthesis_source: str = 'tavily+gemini') -> bool:
     """Envoie un email de notification via Gmail API.
     Si novelties est fourni, n'envoie que les nouveautés. Si None, aucune nouveauté → skip.
     Si novelties vaut synthesis (premier run ou Gemini absent), envoie le contenu complet.
@@ -690,6 +767,20 @@ def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
     if notion_page_id:
         notion_url = f"https://notion.so/{notion_page_id}"
 
+    # Bandeau source
+    if synthesis_source == 'tavily+gemini':
+        source_banner = '<p style="background:#eafaf1;border-left:4px solid #2ecc71;padding:10px;margin:15px 0;">🤖 <strong>Rapport généré par Tavily + Gemini</strong></p>'
+    elif synthesis_source == 'tavily+groq':
+        source_banner = '<p style="background:#eafaf1;border-left:4px solid #27ae60;padding:10px;margin:15px 0;">🤖 <strong>Rapport généré par Tavily + Groq</strong> (fallback)</p>'
+    elif synthesis_source == 'tavily':
+        source_banner = '<p style="background:#ebf5fb;border-left:4px solid #3498db;padding:10px;margin:15px 0;">🔍 <strong>Rapport basé sur Tavily</strong> (synthèse LLM indisponible)</p>'
+    elif synthesis_source == 'gemini':
+        source_banner = '<p style="background:#e8f4fd;border-left:4px solid #3498db;padding:10px;margin:15px 0;">🤖 <strong>Rapport généré par Gemini</strong> (sans recherche web)</p>'
+    elif synthesis_source == 'groq':
+        source_banner = '<p style="background:#f0ebff;border-left:4px solid #8e44ad;padding:10px;margin:15px 0;">🤖 <strong>Rapport généré par Groq</strong> (fallback)</p>'
+    else:
+        source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Sources indisponibles</strong> — Vérifiez la configuration.</p>'
+
     try:
         service = get_gmail_service(config)
 
@@ -707,7 +798,6 @@ Healthcare Watch - Newsletter automatisée
 
         header_color = '#2c3e50' if is_full else '#e67e22'
         notion_button = f'<p><a href="{notion_url}" style="display:inline-block; background-color:#2c3e50; color:#fff; padding:10px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">&#128196; Voir le rapport complet sur Notion</a></p>' if notion_url else ''
-        # Convertit le markdown en HTML simple (bullet points, gras, titres)
         html_body = ''
         for line in novelties.splitlines():
             line_esc = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -723,6 +813,7 @@ Healthcare Watch - Newsletter automatisée
                 html_body += f'<p style="margin:4px 0;">{line_esc}</p>\n'
         html = f"""<html><body style="font-family:Arial,sans-serif; max-width:700px; margin:0 auto; padding:20px;">
 <h2 style="color: {header_color};">{section_label}</h2>
+{source_banner}
 <p>Le rapport <strong>{page_title}</strong> a été généré et ajouté à Notion.</p>
 {notion_button}
 <h3 style="border-bottom:2px solid {header_color}; padding-bottom:6px;">{section_label} :</h3>
@@ -814,10 +905,14 @@ def main():
                     print(f'  Fréquence {freq} non atteinte, skip')
                     continue
 
-                # 1. Interroger l'IA (Perplexity avec fallback Gemini)
+                # 1. Recherche Tavily + synthèse LLM
                 prompt_text = prompt_config.get('prompt', '')
-                options = prompt_config.get('options', {})
-                synthesis = query_with_fallback(prompt_text, config, options)
+                options = {
+                    **prompt_config.get('options', {}),
+                    '_prompt_key': prompt_key,
+                    '_prompt_config': prompt_config,
+                }
+                synthesis, synthesis_source = query_with_fallback(prompt_text, config, options)
 
                 # 2. Détecter les nouveautés vs rapport précédent
                 prev_hash, prev_snippet = get_previous_content(prompt_key, last_run_file)
@@ -849,7 +944,7 @@ def main():
                     raise Exception('Échec de la création de la page Notion')
 
                 # 4. Envoyer email uniquement si des nouveautés ont été détectées
-                send_notification_email(prompt_key, synthesis, page_title, config, novelties, page_id)
+                send_notification_email(prompt_key, synthesis, page_title, config, novelties, page_id, synthesis_source)
 
                 # 5. Mettre à jour la date d'exécution + hash du contenu
                 update_last_run(prompt_key, last_run_file, synthesis)
