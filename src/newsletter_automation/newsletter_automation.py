@@ -38,15 +38,15 @@ BASE_DIR = Path(__file__).resolve().parent
 # Priorité aux variables d'environnement (pour GitHub Actions)
 # Puis fallback sur config/config.py (pour dev local)
 
-PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY')
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_PARENT_PAGE_ID = os.environ.get('NOTION_PARENT_PAGE_ID')
 NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL')
 
 # Si les variables d'environnement ne sont pas définies, charger config.py
-if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATION_EMAIL]):
+if not all([NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATION_EMAIL]):
     print('⚙️  Variables d\'environnement non trouvées, chargement de config.py...')
     
     # Essayer d'abord le chemin relatif au répertoire courant (GitHub Actions)
@@ -72,9 +72,9 @@ if not all([PERPLEXITY_API_KEY, NOTION_TOKEN, NOTION_PARENT_PAGE_ID, NOTIFICATIO
     CONFIG = config_module.CONFIG
     SCOPES = config_module.SCOPES
     
-    PERPLEXITY_API_KEY = CONFIG.get('PERPLEXITY_API_KEY')
     GEMINI_API_KEY = GEMINI_API_KEY or CONFIG.get('GEMINI_API_KEY', '')
     GROQ_API_KEY = GROQ_API_KEY or CONFIG.get('GROQ_API_KEY', '')
+    TAVILY_API_KEY = TAVILY_API_KEY or CONFIG.get('TAVILY_API_KEY', '')
     NOTION_TOKEN = CONFIG['NOTION_TOKEN']
     NOTION_PARENT_PAGE_ID = CONFIG['NOTION_PARENT_PAGE_ID']
     NOTIFICATION_EMAIL = CONFIG['NOTIFICATION_EMAIL']
@@ -119,9 +119,9 @@ EMAIL_SOURCES = load_email_sources()
 
 # Créer un objet CONFIG pour compatibilité avec le reste du code
 CONFIG = {
-    'PERPLEXITY_API_KEY': PERPLEXITY_API_KEY,
     'GEMINI_API_KEY': GEMINI_API_KEY,
     'GROQ_API_KEY': GROQ_API_KEY,
+    'TAVILY_API_KEY': TAVILY_API_KEY,
     'NOTION_TOKEN': NOTION_TOKEN,
     'NOTION_PARENT_PAGE_ID': NOTION_PARENT_PAGE_ID,
     'NOTIFICATION_EMAIL': NOTIFICATION_EMAIL,
@@ -382,15 +382,15 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     print('📬 Envoi de la notification...')
 
     # Bandeau source de la synthèse
-    if synthesis_source == 'perplexity':
-        source_banner = '<p style="background:#eafaf1;border-left:4px solid #2ecc71;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Perplexity AI</strong> (modèle sonar)</p>'
-        subject_source = '🤖 Perplexity AI'
-    elif synthesis_source == 'gemini':
-        source_banner = '<p style="background:#e8f4fd;border-left:4px solid #3498db;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Google Gemini</strong> (modèle gemini-2.5-flash) — Perplexity indisponible</p>'
-        subject_source = '🤖 Gemini (fallback)'
+    if synthesis_source == 'gemini':
+        source_banner = '<p style="background:#e8f4fd;border-left:4px solid #3498db;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Google Gemini</strong> (modèle gemini-2.5-flash)</p>'
+        subject_source = '🤖 Gemini'
     elif synthesis_source == 'groq':
-        source_banner = '<p style="background:#f0ebff;border-left:4px solid #8e44ad;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Groq</strong> (modèle llama-3.3-70b) — Perplexity et Gemini indisponibles</p>'
+        source_banner = '<p style="background:#f0ebff;border-left:4px solid #8e44ad;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Groq</strong> (modèle llama-3.3-70b) — Gemini indisponible</p>'
         subject_source = '🤖 Groq (fallback)'
+    elif synthesis_source == 'tavily':
+        source_banner = '<p style="background:#fff8e1;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Tavily AI</strong> — Gemini et Groq indisponibles</p>'
+        subject_source = '🤖 Tavily (fallback)'
     else:
         source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Tous les services AI indisponibles — Contenu brut agrégé</strong> joint en pièce jointe. Chargez-le dans <strong>NotebookLM</strong> pour en faire une synthèse.</p>'
         subject_source = '📄 Contenu brut (AI indisponible)'
@@ -511,20 +511,18 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
     print('✅ Notification envoyée avec pièce jointe')
 
 
-# ==================== FONCTION PERPLEXITY ====================
-def synthesize_with_perplexity(emails, max_retries=3):
-    """Génère une synthèse avec Perplexity AI"""
+# ==================== FONCTION TAVILY (fallback 3) ====================
+def synthesize_with_tavily(emails):
+    """Génère une synthèse avec Tavily AI (fallback si Gemini et Groq indisponibles)"""
     import time
-    print('🤖 Synthèse avec Perplexity...')
-    
-    # Vérifier que la clé API est disponible
-    api_key = CONFIG.get('PERPLEXITY_API_KEY', '').strip()
+    print('🤖 Synthèse avec Tavily...')
+
+    api_key = CONFIG.get('TAVILY_API_KEY', '').strip()
     if not api_key:
-        raise Exception('ERREUR: PERPLEXITY_API_KEY n\'est pas configurée. Vérifiez votre fichier .env')
-    
-    # Préparer le contenu (troncature déjà appliquée en amont dans fetch_newsletters)
+        raise Exception('TAVILY_API_KEY non configurée')
+
     emails_text = '\n\n'.join([
-        f"### {email['from']} - {email['subject']}\n\n{email['content']}\n\n---"
+        f"### {email['from']} - {email['subject']}\n\n{email['content'][:6000]}\n\n---"
         for email in emails
     ])
 
@@ -536,10 +534,10 @@ Crée une synthèse COMPLÈTE et NON TRONQUÉE des newsletters reçues aujourd'h
 
 ## SYNTHÈSE STRUCTURÉE DES NEWSLETTERS
 
-**Source de la synthèse : Perplexity AI (modèle sonar)**
+**Source de la synthèse : Tavily AI**
 
 Pour chaque thème principal trouvé, crée une section avec :
-- **Titre du thème** (ex: Cybersécurité Santé, Ransomware, IA Médicale, Réglementation, etc.)
+- **Titre du thème**
 - Une **introduction** courte présentant le sujet
 - Une liste de **points clés** (utilise • pour chaque point important)
 - Les **éléments à retenir** avec impact ou implications
@@ -558,89 +556,54 @@ Ajoute des emojis pertinents pour améliorer la lisibilité.
 NEWSLETTERS À SYNTHÉTISER :
 {emails_text}"""
 
-    # Appel API Perplexity avec retry et gestion d'erreurs améliorée
-    for attempt in range(max_retries):
+    for attempt in range(3):
         try:
-            headers = {
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json',
-                'User-Agent': 'NewsletterAutomation/1.0'
-            }
-
-            payload = {
-                'model': 'sonar',
-                'messages': [
-                    {
-                        'role': 'system',
-                        'content': 'Tu es un assistant qui synthétise des newsletters (tech, cybersécurité, santé, etc.) en français de manière détaillée, structurée et COMPLÈTE sans jamais tronquer le contenu.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ],
-                'max_tokens': 8000,
-                'temperature': 0.2
-            }
-            
-            print(f'  Tentative {attempt + 1}/{max_retries}...')
+            print(f'  Tentative {attempt + 1}/3...')
             response = requests.post(
-                'https://api.perplexity.ai/chat/completions',
-                headers=headers,
-                json=payload,
+                'https://api.tavily.com/extract',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json={
+                    'query': prompt,
+                    'search_depth': 'basic',
+                    'include_answer': True,
+                    'max_results': 1
+                },
                 timeout=60
             )
-            
-            # Afficher le statut
             print(f'  Réponse API: HTTP {response.status_code}')
-            
-            if response.status_code == 401:
-                raise Exception('ERREUR 401: Authentification échouée. Vérifiez votre PERPLEXITY_API_KEY')
-            elif response.status_code == 403:
-                raise Exception('ERREUR 403: Accès refusé. Vérifiez les permissions de votre clé API')
-            elif response.status_code == 429:
+
+            if response.status_code == 429:
                 print('  Limite de débit atteinte, attente 30s...')
                 time.sleep(30)
                 continue
-            elif response.status_code == 500:
-                print('  Erreur serveur Perplexity, nouvelle tentative...')
-                time.sleep(5)
-                continue
             elif response.status_code != 200:
-                print(f'  Erreur HTTP {response.status_code}')
-                print(f'  Réponse: {response.text}')
-                raise Exception(f'Erreur Perplexity API: {response.status_code} - {response.text}')
-            
+                raise Exception(f'Erreur Tavily API: {response.status_code} - {response.text}')
+
             data = response.json()
-            
-            # Vérifier le format de la réponse
-            if 'choices' not in data or not data['choices']:
-                raise Exception(f'Format de réponse invalide: {data}')
-            
-            synthesis = data['choices'][0]['message']['content']
-            
-            print('✅ Synthèse générée avec succès')
+            synthesis = data.get('answer', '')
+            if not synthesis:
+                raise Exception('Tavily n\'a pas retourné de réponse')
+            print('✅ Synthèse Tavily générée avec succès')
             return synthesis
-            
+
         except requests.exceptions.Timeout:
-            print(f'  Timeout (tentative {attempt + 1}/{max_retries})')
-            if attempt < max_retries - 1:
+            print(f'  Timeout (tentative {attempt + 1}/3)')
+            if attempt < 2:
                 time.sleep(5)
                 continue
-            raise Exception('Timeout: Perplexity API n\'a pas répondu à temps')
+            raise Exception('Timeout: Tavily API n\'a pas répondu à temps')
         except requests.exceptions.ConnectionError as e:
-            print(f'  Erreur de connexion: {e}')
-            if attempt < max_retries - 1:
+            if attempt < 2:
                 time.sleep(5)
                 continue
             raise
-    
-    raise Exception('Impossible de contacter Perplexity API après plusieurs tentatives')
+
+    raise Exception('Impossible de contacter Tavily API après plusieurs tentatives')
 
 
-# ==================== FONCTION GEMINI (fallback 1) ====================
+# ==================== FONCTION GEMINI (priorité 1) ====================
 def synthesize_with_gemini(emails):
-    """Génère une synthèse avec Google Gemini (fallback si Perplexity indisponible)"""
+    """Génère une synthèse avec Google Gemini (priorité 1)"""
     import time
     print('🤖 Synthèse avec Gemini...')
 
@@ -727,7 +690,7 @@ NEWSLETTERS À SYNTHÉTISER :
 
 # ==================== FONCTION GROQ (fallback 2) ====================
 def synthesize_with_groq(emails):
-    """Génère une synthèse avec Groq (fallback gratuit si Perplexity et Gemini indisponibles)"""
+    """Génère une synthèse avec Groq (fallback 2 si Gemini indisponible)"""
     import time
     print('🤖 Synthèse avec Groq...')
 
@@ -844,17 +807,8 @@ def aggregate_raw_content(emails):
 
 # ==================== FONCTION SYNTHÈSE AVEC FALLBACK ====================
 def synthesize_with_fallback(emails):
-    """Cascade de synthèse : Perplexity → Gemini → Groq → contenu brut (NotebookLM).
-    Retourne un tuple (synthesis, source) où source vaut 'perplexity', 'gemini', 'groq' ou 'raw'."""
-    if CONFIG.get('PERPLEXITY_API_KEY', '').strip():
-        try:
-            return synthesize_with_perplexity(emails), 'perplexity'
-        except Exception as e:
-            print(f'⚠️  Perplexity a échoué: {e}')
-            print('🔄 Basculement sur Gemini...')
-    else:
-        print('ℹ️  PERPLEXITY_API_KEY non configurée, tentative Gemini...')
-
+    """Cascade de synthèse : Gemini → Groq → Tavily → contenu brut (NotebookLM).
+    Retourne un tuple (synthesis, source) où source vaut 'gemini', 'groq', 'tavily' ou 'raw'."""
     if CONFIG.get('GEMINI_API_KEY', '').strip():
         try:
             return synthesize_with_gemini(emails), 'gemini'
@@ -869,9 +823,18 @@ def synthesize_with_fallback(emails):
             return synthesize_with_groq(emails), 'groq'
         except Exception as e:
             print(f'⚠️  Groq a échoué: {e}')
+            print('🔄 Basculement sur Tavily...')
+    else:
+        print('ℹ️  GROQ_API_KEY non configurée, tentative Tavily...')
+
+    if CONFIG.get('TAVILY_API_KEY', '').strip():
+        try:
+            return synthesize_with_tavily(emails), 'tavily'
+        except Exception as e:
+            print(f'⚠️  Tavily a échoué: {e}')
             print('🔄 Basculement sur agrégation brute pour NotebookLM...')
     else:
-        print('ℹ️  GROQ_API_KEY non configurée, agrégation brute pour NotebookLM.')
+        print('ℹ️  TAVILY_API_KEY non configurée, agrégation brute pour NotebookLM.')
 
     return aggregate_raw_content(emails), 'raw'
 
@@ -999,8 +962,8 @@ def main():
         
         # 1. Vérifier la configuration
         print('📋 Vérification de la configuration...')
-        if not CONFIG.get('PERPLEXITY_API_KEY'):
-            print('ℹ️  PERPLEXITY_API_KEY non configurée — le contenu brut sera agrégé pour NotebookLM en cas d\'échec')
+        if not CONFIG.get('GEMINI_API_KEY'):
+            print('ℹ️  GEMINI_API_KEY non configurée — cascade: Groq → Tavily → contenu brut')
         if not CONFIG.get('NOTION_TOKEN'):
             raise Exception('NOTION_TOKEN non configuré. Ajoutez-le à votre fichier .env')
         if not CONFIG.get('NOTION_PARENT_PAGE_ID'):
