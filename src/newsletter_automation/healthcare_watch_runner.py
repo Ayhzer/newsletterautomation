@@ -688,7 +688,7 @@ def send_notification_email(prompt_key: str, synthesis: str, page_title: str,
     # Lien vers la page Notion
     notion_url = None
     if notion_page_id:
-        notion_url = f"https://notion.so/{notion_page_id.replace('-', '')}"
+        notion_url = f"https://notion.so/{notion_page_id}"
 
     try:
         service = get_gmail_service(config)
