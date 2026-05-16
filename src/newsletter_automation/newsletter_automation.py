@@ -386,14 +386,14 @@ def send_notification(service, notion_url, synthesis_path, emails=None, notebook
         source_banner = '<p style="background:#e8f4fd;border-left:4px solid #3498db;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Google Gemini</strong> (modèle gemini-2.5-flash)</p>'
         subject_source = '🤖 Gemini'
     elif synthesis_source == 'groq':
-        source_banner = '<p style="background:#f0ebff;border-left:4px solid #8e44ad;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Groq</strong> (modèle llama-3.3-70b) — Gemini indisponible</p>'
-        subject_source = '🤖 Groq (fallback)'
+        source_banner = '<p style="background:#f0ebff;border-left:4px solid #8e44ad;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Groq</strong> (modèle llama-3.3-70b) — Gemini indisponible ou quota atteint</p>'
+        subject_source = '🤖 Groq'
     elif synthesis_source == 'tavily':
-        source_banner = '<p style="background:#fff8e1;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">🤖 <strong>Synthèse générée par Tavily AI</strong> — Gemini et Groq indisponibles</p>'
-        subject_source = '🤖 Tavily (fallback)'
+        source_banner = '<p style="background:#fff8e1;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">🔍 <strong>Synthèse générée par Tavily</strong> (recherche web) — Gemini et Groq indisponibles</p>'
+        subject_source = '🔍 Tavily'
     else:
         source_banner = '<p style="background:#fef9e7;border-left:4px solid #f39c12;padding:10px;margin:15px 0;">⚠️ <strong>Tous les services AI indisponibles — Contenu brut agrégé</strong> joint en pièce jointe. Chargez-le dans <strong>NotebookLM</strong> pour en faire une synthèse.</p>'
-        subject_source = '📄 Contenu brut (AI indisponible)'
+        subject_source = '📄 Contenu brut'
 
     # Construire la liste des emails traités
     emails_list_html = ''
